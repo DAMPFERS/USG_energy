@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>МКИ 2026 — Панель энергетика</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<header class="top">
+  <img class="logo" src="assets/logo_1.png" alt="Логотип 1">
+  <div class="title">
+    <h1>Панель энергетика</h1>
+    <p><span id="dayName">МКИ: Энергетическая система купола</span> · <span id="phaseName" class="phase">—</span></p>
+  </div>
+  <div class="clock">
+    <div id="clock" class="clock-time">--:--:--</div>
+    <div class="live"><i id="liveDot"></i><span id="upd">подключение…</span></div>
+  </div>
+  <img class="logo" src="assets/logo_2.png" alt="Логотип 2">
+</header>
+
+<main class="layout">
+  <!-- ===== линии ===== -->
+  <section class="panel lines-panel" aria-label="Энергетические линии">
+    <h2>Линии энергоснабжения</h2>
+    <div id="lineButtons" class="line-buttons"></div>
+  </section>
+
+  <!-- ===== центр: показатели и график ===== -->
+  <section class="center">
+    <div class="kpis">
+      <div class="kpi" style="--lc:var(--or)"><span>Генерация</span><b id="kGen">—</b></div>
+      <div class="kpi" style="--lc:var(--bl2)"><span>Потребление</span><b id="kCons">—</b></div>
+      <div class="kpi"><span>Баланс</span><b id="kNet">—</b></div>
+      <div class="kpi corridor-kpi" id="kCorrBox"><span>Коридор</span><b id="kCorr">—</b><em id="kCorrState"></em></div>
+    </div>
+    <div id="alarms" class="alarms" aria-live="assertive"></div>
+
+    <article class="panel chart-card" aria-label="Генерация, потребление и прогноз">
+      <div class="card-head">
+        <h2>Генерация и потребление</h2>
+        <div class="seg" role="group" aria-label="Диапазон">
+          <button type="button" data-range="day" class="is-sel">Весь день</button>
+          <button type="button" data-range="2h">2 часа</button>
+        </div>
+      </div>
+      <div class="series-toggles" id="seriesToggles"></div>
+      <div class="line-toggles" id="lineToggles" aria-label="Показать линию на графике"></div>
+      <div class="chart-wrap" id="powerWrap">
+        <svg id="powerChart" class="chart" preserveAspectRatio="none"></svg>
+        <div id="powerTip" class="tip" hidden></div>
+      </div>
+      <details class="tbl">
+        <summary>Таблица данных</summary>
+        <div class="tbl-scroll"><table id="powerTable"></table></div>
+      </details>
+    </article>
+  </section>
+
+  <!-- ===== справа: АКБ и терминал ===== -->
+  <section class="right">
+    <article class="panel bat-panel" aria-label="Аккумуляторы">
+      <h2>Накопители</h2>
+      <div id="batteries" class="batteries"></div>
+    </article>
+    <article class="terminal" aria-label="Терминал">
+      <div class="term-head"><span>dome-sys :: журнал</span><span id="termStats" title="перегруз ▲ · гибернация ▼ · дефицит ⚡"></span></div>
+      <div id="termBody" class="term-body" role="log" aria-live="polite"></div>
+    </article>
+  </section>
+</main>
+<div id="toast" class="toast" hidden></div>
+<script src="js/config.js"></script>
+<script src="js/energy.js"></script>
+</body>
+</html>

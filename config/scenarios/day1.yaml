@@ -1,0 +1,152 @@
+# ============================================================================
+#  Сценарий игрового дня. Один файл = один день.
+#  Время — «HH:MM» (время купола). Мощность — кВт, энергия — кВт·ч.
+# ============================================================================
+
+day: "День 1 — Развёртывание базы"
+# date: 2026-10-07            # если указано — сценарий активен только в эту дату
+start: "08:00"                # начало игрового дня (до него — ожидание, баланс не считается)
+end: "20:00"                  # конец игрового дня
+forecast_csv: ../../data/forecast_day1.csv   # прогноз солнца: time,forecast_kw,sigma_kw
+history_step_s: 30            # шаг записи истории (игровые секунды)
+
+# --------------------------------------------------------------------------- АКБ
+# max_charge_kw / max_discharge_kw — номинал; peak_discharge_kw — кратковременный пик.
+# overload_tolerance_s — сколько секунд АКБ терпит разряд выше номинала, затем уходит
+#   в защиту (status: fault) на fault_recovery_min минут.
+# efficiency — КПД заряда; self_discharge_pct_h — саморазряд, % ёмкости в час.
+# status: ok | degraded | failed
+batteries:
+  - id: A
+    name: "АКБ-1 Литий-ион"
+    description: "Большая ёмкость, средняя мощность"
+    capacity_kwh: 20
+    charge_kwh: 12
+    max_charge_kw: 4
+    max_discharge_kw: 4
+    peak_discharge_kw: 6
+    efficiency: 0.95
+    overload_tolerance_s: 120
+    fault_recovery_min: 15
+  - id: B
+    name: "АКБ-2 Свинцово-кислотный"
+    description: "Надёжный, но медленный"
+    capacity_kwh: 12
+    charge_kwh: 8
+    max_charge_kw: 2
+    max_discharge_kw: 3
+    peak_discharge_kw: 3.5
+    efficiency: 0.85
+    overload_tolerance_s: 30
+    fault_recovery_min: 10
+  - id: C
+    name: "Суперконденсатор"
+    description: "Малая ёмкость, огромная мощность, саморазряд"
+    capacity_kwh: 3
+    charge_kwh: 2
+    max_charge_kw: 8
+    max_discharge_kw: 10
+    peak_discharge_kw: 15
+    efficiency: 0.98
+    self_discharge_pct_h: 5
+    overload_tolerance_s: 300
+    fault_recovery_min: 5
+active_battery: A
+
+# --------------------------------------------------------------------------- по умолчанию
+# Действуют, когда текущий момент не попадает ни в одну фазу.
+# Последствия (on_overload / on_underload / on_deficit):
+#   grace_s       — сколько игровых секунд нарушение терпится (участники видят обратный отсчёт)
+#   trip          — что отключить: auto (самые мощные, пока не уйдём из нарушения) | all |
+#                   top:N (N самых мощных) | [3, 7] (конкретные линии)
+#   duration_min  — на сколько минут линии блокируются
+#   message, level — сообщение в терминал
+defaults:
+  corridor: {min_kw: 2.0, max_kw: 9.0}
+  solar_factor: 1.0
+  on_overload:  {grace_s: 30, trip: auto, duration_min: 10}
+  on_underload: {grace_s: 60, trip: all,  duration_min: 5}
+  on_deficit:   {grace_s: 15, trip: auto, duration_min: 10}
+
+# --------------------------------------------------------------------------- фазы
+# Интервалы [from, to). Внутри фазы действуют её коридор, коэффициент солнца,
+# блокировки линий и (опционально) свои последствия. message — пишется в терминал
+# в начале фазы. batteries — изменения АКБ в начале фазы.
+phases:
+  - name: "Утренний запуск"
+    from: "08:00"
+    to: "10:00"
+    corridor: {min_kw: 3.0, max_kw: 8.0}
+    message:
+      level: INFO
+      text: |
+        Доброе утро, диспетчер. Экипаж просыпается и запускает системы жизнеобеспечения.
+        Коридор мощности: 3.0–8.0 кВт. Солнце встаёт, рассчитывайте на АКБ.
+
+  - name: "Научная программа"
+    from: "10:00"
+    to: "12:00"
+    corridor: {min_kw: 5.0, max_kw: 10.0}
+    message: "Начинаются эксперименты в лаборатории. Допустимый коридор: 5.0–10.0 кВт."
+
+  - name: "Песчаная буря"
+    from: "12:00"
+    to: "14:00"
+    corridor: {min_kw: 3.0, max_kw: 6.0}
+    solar_factor: 0.3          # фактическая генерация = 30% от прогноза
+    locked_lines:
+      7: "Внешние прожекторы обесточены на время бури"
+    on_overload: {grace_s: 15, trip: auto, duration_min: 15}
+    message:
+      level: CRIT
+      text: |
+        ТРЕВОГА! Песчаная буря накрыла купол. Генерация солнечных панелей упала.
+        Коридор сужен до 3.0–6.0 кВт, защита от перегруза ужесточена (15 с).
+
+  - name: "После бури"
+    from: "14:00"
+    to: "15:00"
+    corridor: {min_kw: 4.0, max_kw: 9.0}
+    solar_factor: 0.8
+    message: {level: OK, text: "Буря стихает. Панели очищаются, генерация восстанавливается."}
+
+  - name: "Ремонт шлюза"
+    from: "15:00"
+    to: "18:00"
+    corridor: {min_kw: 6.0, max_kw: 11.0}
+    message: "Экипаж ремонтирует шлюз: нужна мощность сварочного поста. Коридор: 6.0–11.0 кВт."
+
+  - name: "Вечерний режим"
+    from: "18:00"
+    to: "20:00"
+    corridor: {min_kw: 2.0, max_kw: 6.0}
+    message: "Вечер. Солнце садится — переведите нагрузку на минимум, сохраните заряд на ночь."
+
+# --------------------------------------------------------------------------- события
+# Разовые события. at — время. Можно: message (+level), batteries (изменить параметры АКБ),
+# lock_lines {lines, duration_min, reason} — авария на линиях, set_active_battery.
+events:
+  - at: "07:58"
+    level: INFO
+    message: "Связь с куполом установлена. Диспетчерская смена начинается в 08:00."
+
+  - at: "11:40"
+    level: WARN
+    message: "Метеослужба: к куполу приближается пылевой фронт. Ожидается в 12:00. Зарядите АКБ!"
+
+  - at: "15:30"
+    level: WARN
+    message: "Диагностика: АКБ-2 перегрелся, ёмкость снижена до 7 кВт·ч, номинал разряда — 2 кВт."
+    batteries:
+      B: {status: degraded, capacity_kwh: 7, max_discharge_kw: 2, peak_discharge_kw: 2.5}
+
+  - at: "16:30"
+    level: CRIT
+    message: "Короткое замыкание на линии 3! Линия обесточена на 20 минут для ремонта."
+    lock_lines: {lines: [3], duration_min: 20, reason: "Короткое замыкание, идёт ремонт"}
+
+  - at: "17:30"
+    level: CRIT
+    message: "Отказ АКБ-2: обрыв банки. Накопитель выведен из работы до конца дня."
+    batteries:
+      B: {status: failed}

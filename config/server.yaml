@@ -1,0 +1,49 @@
+# Конфигурация сервера энергосистемы купола.
+# Пути — относительно корня проекта.
+
+host: 0.0.0.0
+port: 8000
+admin_token: "change-me"          # для /api/admin/* (заголовок X-Admin-Token)
+
+scenario: config/scenarios/day1.yaml   # сценарий текущего игрового дня
+logs_dir: logs
+static_dir: static
+
+# Часы игры:
+#   mode: real — реальное время (боевой режим)
+#   mode: sim  — отладка: старт с start, ускорение speed (20 = час за 3 минуты)
+clock:
+  mode: sim
+  start: "07:58"
+  speed: 20
+
+relay_poll_s: 1.0     # период опроса реле
+engine_tick_s: 1.0    # период расчёта баланса
+
+solar:
+  source: sim         # сейчас — пересчёт прогноза с разбросом; позже — реальные панели
+  interval_s: 1.0
+  noise: 1.0          # множитель к sigma из прогноза (0 — генерация точно по прогнозу)
+  correlation: 0.97   # 0..1, чем ближе к 1, тем плавнее «облака»
+
+# Линии. driver: sim — эмулятор, tuya — реальное реле TONGOU (данные из smart_rele/devices.json).
+# scale: игровые кВт = измеренные реле кВт * scale (лампа 60 Вт при scale 20 = 1.2 кВт купола).
+lines:
+  - {id: 1,  name: "Линия 1",  driver: sim, sim: {base_kw: 1.2, variability: 0.08}}
+  - {id: 2,  name: "Линия 2",  driver: sim, sim: {base_kw: 0.9, variability: 0.05}}
+  - {id: 3,  name: "Линия 3",  driver: sim, sim: {base_kw: 1.6, variability: 0.15}}
+  - {id: 4,  name: "Линия 4",  driver: sim, sim: {base_kw: 0.5, variability: 0.03}}
+  - {id: 5,  name: "Линия 5",  driver: sim, sim: {base_kw: 0.7, variability: 0.06}}
+  - {id: 6,  name: "Линия 6",  driver: sim, sim: {base_kw: 1.1, variability: 0.10}}
+  - {id: 7,  name: "Линия 7",  driver: sim, sim: {base_kw: 1.4, variability: 0.12}}
+  - {id: 8,  name: "Линия 8",  driver: sim, sim: {base_kw: 0.4, variability: 0.02}}
+  - {id: 9,  name: "Линия 9",  driver: sim, sim: {base_kw: 0.8, variability: 0.07}}
+  - {id: 10, name: "Линия 10", driver: sim, sim: {base_kw: 0.6, variability: 0.05}}
+  - {id: 11, name: "Линия 11", driver: sim, sim: {base_kw: 1.0, variability: 0.09}}
+  - {id: 12, name: "Линия 12", driver: sim, sim: {base_kw: 0.3, variability: 0.02}}
+  # Пример реального реле:
+  # - id: 1
+  #   name: "Линия 1"
+  #   driver: tuya
+  #   scale: 20
+  #   tuya: {device_id: "bfb1c8ae96a0f61b84fphs", local_key: "<local key>", ip: "192.168.137.193", version: 3.5}

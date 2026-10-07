@@ -29,6 +29,7 @@ server/
   engine.py    игровой движок: баланс, коридор, штрафы, события, история, сохранение
   terminal.py  журнал сообщений терминала (logs/terminal_<день>.log)
   app.py       HTTP API
+  telemetry.py телеметрия для ЦУП (REST + WebSocket, см. TELEMETRY.md)
 static/       веб-панель участника
 logs/         terminal_*.log, telemetry_*.csv (история), actions_*.log (действия), state_*.json
 ```
@@ -56,6 +57,12 @@ logs/         terminal_*.log, telemetry_*.csv (история), actions_*.log (�
 POST /api/admin/message  {"text": "...", "level": "INFO|WARN|CRIT|OK"}   X-Admin-Token: <admin_token>
 POST /api/admin/time     {"time": "13:30"}   перемотка (только clock.mode: sim)
 ```
+
+## Телеметрия для ЦУП
+
+Только чтение, в Вт / А / А·ч: `WS /ws/telemetry` (поток раз в секунду) и
+`GET /api/telemetry`, `/api/telemetry/meta`, `/api/telemetry/forecast`, `/api/telemetry/history`.
+Настройки — раздел `telemetry` в `config/server.yaml`, описание протокола — [TELEMETRY.md](TELEMETRY.md).
 
 ## Реальные реле
 

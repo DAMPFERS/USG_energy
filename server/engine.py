@@ -499,6 +499,7 @@ class Engine:
             fields = dict(fields)
             fields["fault_until"] = _from_iso(fields.get("fault_until"))
             fields.pop("id", None)
+            fields.pop("voltage_v", None)   # напряжение — всегда из сценария
             for k, v in fields.items():
                 if hasattr(b, k):
                     setattr(b, k, v)

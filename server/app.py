@@ -9,6 +9,8 @@ POST /api/line               — {"line": 3, "on": true}
 POST /api/battery/active     — {"id": "B"}
 POST /api/admin/message      — {"text": "...", "level": "WARN"}   (заголовок X-Admin-Token)
 POST /api/admin/time         — {"time": "13:30"}  перемотка, только clock.mode = sim
+
+Телеметрия для ЦУП (Вт, А, А·ч) — см. server/telemetry.py и TELEMETRY.md.
 """
 import os
 
@@ -18,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .engine import Engine
+from . import telemetry
 
 
 class LineCmd(BaseModel):
@@ -38,8 +41,10 @@ class AdminTime(BaseModel):
     time: str
 
 
-def create_app(engine: Engine, static_dir: str, admin_token: str | None) -> FastAPI:
+def create_app(engine: Engine, static_dir: str, admin_token: str | None,
+               telemetry_cfg: dict | None = None) -> FastAPI:
     app = FastAPI(title="Купол: энергосистема")
+    telemetry.install(app, engine, telemetry_cfg)
 
     def check_admin(token):
         if not admin_token or token != admin_token:

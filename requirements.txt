@@ -1,4 +1,5 @@
 fastapi>=0.110
 uvicorn>=0.29
+websockets>=12.0
 pyyaml>=6.0
 tinytuya>=1.13

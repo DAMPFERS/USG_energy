@@ -35,6 +35,7 @@ class Battery:
     status: str = "ok"
     description: str = ""
     nominal_kwh: float | None = None  # паспортная ёмкость (для отображения потерь при деградации)
+    voltage_v: float | None = None    # номинальное напряжение (для телеметрии в А и А·ч)
     # динамика
     power_kw: float = 0.0             # >0 заряд, <0 разряд
     overload_s: float = 0.0

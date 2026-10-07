@@ -77,7 +77,8 @@ def main():
     engine.start()
     logging.info("Сценарий: %s (%s), часы: %s x%.1f", sc.day, sc.id, clock.mode, clock.speed)
 
-    app = create_app(engine, p(cfg.get("static_dir", "static")), cfg.get("admin_token"))
+    app = create_app(engine, p(cfg.get("static_dir", "static")), cfg.get("admin_token"),
+                     cfg.get("telemetry") or {})
     try:
         uvicorn.run(app, host=cfg.get("host", "0.0.0.0"), port=int(cfg.get("port", 8000)), log_level="warning")
     finally:

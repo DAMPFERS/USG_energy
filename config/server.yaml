@@ -17,6 +17,16 @@ clock:
   start: "07:58"
   speed: 20
 
+# Телеметрия для ЦУП (описание протокола — TELEMETRY.md):
+#   GET /api/telemetry, /api/telemetry/meta, /api/telemetry/forecast, /api/telemetry/history
+#   WS  /ws/telemetry
+telemetry:
+  token: ""                 # пусто — без авторизации; иначе X-Telemetry-Token или ?token=
+  push_interval_s: 1.0      # период отправки среза по WebSocket (реальные секунды)
+  battery_voltage_v: 48     # номинальное напряжение АКБ для пересчёта в А и А·ч (в сценарии можно задать voltage_v у АКБ)
+  forecast_step_min: 15     # шаг прогноза W(t) по умолчанию
+  cors_origins: ["*"]       # с каких веб-страниц разрешены запросы GET (для панели ЦУП в браузере)
+
 relay_poll_s: 1.0     # период опроса реле
 engine_tick_s: 1.0    # период расчёта баланса
 

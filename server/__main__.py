@@ -18,6 +18,7 @@ import yaml
 from .app import create_app
 from .clock import GameClock
 from .engine import Engine
+from .linemap import LineMap
 from .relays import RelayManager, build_lines
 from .scenario import load_scenario
 from .solar import Forecast, SimSolarSource
@@ -62,7 +63,10 @@ def main():
     clock = GameClock(ck.get("mode", "real"), ck.get("start"), ck.get("speed", 1.0),
                       date.fromisoformat(sc.date) if sc.date else None)
 
-    relays = RelayManager(build_lines(cfg["lines"]), float(cfg.get("relay_poll_s", 1.0)))
+    line_cfgs = build_lines(cfg["lines"])
+    relays = RelayManager(line_cfgs, float(cfg.get("relay_poll_s", 1.0)))
+    linemap = LineMap([l.id for l in line_cfgs], cfg.get("consumers"), p(cfg.get("line_map", "config/line_map.yaml")),
+                      {l.id: l.name for l in line_cfgs})
     forecast = Forecast(sc.forecast_csv)
     sol = cfg.get("solar", {}) or {}
     if sol.get("source", "sim") != "sim":
@@ -70,7 +74,7 @@ def main():
     solar = SimSolarSource(forecast, clock, float(sol.get("interval_s", 1.0)), float(sol.get("noise", 1.0)),
                            float(sol.get("correlation", 0.97)))
     terminal = Terminal(os.path.join(logs_dir, f"terminal_{sc.id}.log"))
-    engine = Engine(sc, clock, relays, solar, forecast, terminal, logs_dir, float(cfg.get("engine_tick_s", 1.0)))
+    engine = Engine(sc, clock, relays, solar, forecast, terminal, linemap, logs_dir, float(cfg.get("engine_tick_s", 1.0)))
 
     relays.start()
     solar.start()

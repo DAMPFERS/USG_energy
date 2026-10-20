@@ -97,7 +97,7 @@ def build_lines(cfg_lines: list[dict]) -> list[LineConfig]:
     lines = []
     for i, c in enumerate(cfg_lines):
         lid = int(c.get("id", i + 1))
-        name = c.get("name", f"Линия {lid}")
+        name = c.get("name", f"Line {lid}")
         kind = c.get("driver", "sim")
         if kind == "tuya":
             t = c["tuya"]

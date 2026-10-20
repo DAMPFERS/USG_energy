@@ -1,58 +1,58 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>МКИ 2026 — Панель энергетика</title>
+<title>ISG 2026 — Power Engineer Panel</title>
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 <header class="top">
-  <img class="logo" src="assets/logo_1.png" alt="Логотип 1">
+  <img class="logo" src="assets/logo_1.png" alt="Logo 1">
   <div class="title">
-    <h1>Панель энергетика</h1>
-    <p><span id="dayName">МКИ: Энергетическая система купола</span> · <span id="phaseName" class="phase">—</span></p>
+    <h1>Power Engineer Panel</h1>
+    <p><span id="dayName">ISG: Dome power system</span> · <span id="phaseName" class="phase">—</span></p>
   </div>
   <div class="clock">
     <div id="clock" class="clock-time">--:--:--</div>
-    <div class="live"><i id="liveDot"></i><span id="upd">подключение…</span></div>
+    <div class="live"><i id="liveDot"></i><span id="upd">connecting…</span></div>
   </div>
-  <img class="logo" src="assets/logo_2.png" alt="Логотип 2">
+  <img class="logo" src="assets/logo_2.png" alt="Logo 2">
 </header>
 
 <main class="layout">
   <!-- ===== линии ===== -->
-  <section class="panel lines-panel" aria-label="Энергетические линии">
-    <h2>Линии энергоснабжения</h2>
+  <section class="panel lines-panel" aria-label="Power lines">
+    <h2>Power lines</h2>
     <div id="lineButtons" class="line-buttons"></div>
   </section>
 
   <!-- ===== центр: показатели и график ===== -->
   <section class="center">
     <div class="kpis">
-      <div class="kpi" style="--lc:var(--or)"><span>Генерация</span><b id="kGen">—</b></div>
-      <div class="kpi" style="--lc:var(--bl2)"><span>Потребление</span><b id="kCons">—</b></div>
-      <div class="kpi"><span>Баланс</span><b id="kNet">—</b></div>
-      <div class="kpi corridor-kpi" id="kCorrBox"><span>Коридор</span><b id="kCorr">—</b><em id="kCorrState"></em></div>
+      <div class="kpi" style="--lc:var(--or)"><span>Generation</span><b id="kGen">—</b></div>
+      <div class="kpi" style="--lc:var(--bl2)"><span>Consumption</span><b id="kCons">—</b></div>
+      <div class="kpi"><span>Balance</span><b id="kNet">—</b></div>
+      <div class="kpi corridor-kpi" id="kCorrBox"><span>Corridor</span><b id="kCorr">—</b><em id="kCorrState"></em></div>
     </div>
     <div id="alarms" class="alarms" aria-live="assertive"></div>
 
-    <article class="panel chart-card" aria-label="Генерация, потребление и прогноз">
+    <article class="panel chart-card" aria-label="Generation, consumption and forecast">
       <div class="card-head">
-        <h2>Генерация и потребление</h2>
-        <div class="seg" role="group" aria-label="Диапазон">
-          <button type="button" data-range="day" class="is-sel">Весь день</button>
-          <button type="button" data-range="2h">2 часа</button>
+        <h2>Generation and consumption</h2>
+        <div class="seg" role="group" aria-label="Range">
+          <button type="button" data-range="day" class="is-sel">Whole day</button>
+          <button type="button" data-range="2h">2 hours</button>
         </div>
       </div>
       <div class="series-toggles" id="seriesToggles"></div>
-      <div class="line-toggles" id="lineToggles" aria-label="Показать линию на графике"></div>
+      <div class="line-toggles" id="lineToggles" aria-label="Show line on chart"></div>
       <div class="chart-wrap" id="powerWrap">
         <svg id="powerChart" class="chart" preserveAspectRatio="none"></svg>
         <div id="powerTip" class="tip" hidden></div>
       </div>
       <details class="tbl">
-        <summary>Таблица данных</summary>
+        <summary>Data table</summary>
         <div class="tbl-scroll"><table id="powerTable"></table></div>
       </details>
     </article>
@@ -60,12 +60,12 @@
 
   <!-- ===== справа: АКБ и терминал ===== -->
   <section class="right">
-    <article class="panel bat-panel" aria-label="Аккумуляторы">
-      <h2>Накопители</h2>
+    <article class="panel bat-panel" aria-label="Batteries">
+      <h2>Energy storage</h2>
       <div id="batteries" class="batteries"></div>
     </article>
-    <article class="terminal" aria-label="Терминал">
-      <div class="term-head"><span>dome-sys :: журнал</span><span id="termStats" title="перегруз ▲ · гибернация ▼ · дефицит ⚡"></span></div>
+    <article class="terminal" aria-label="Terminal">
+      <div class="term-head"><span>dome-sys :: log</span><span id="termStats" title="overload ▲ · hibernation ▼ · deficit ⚡"></span></div>
       <div id="termBody" class="term-body" role="log" aria-live="polite"></div>
     </article>
   </section>

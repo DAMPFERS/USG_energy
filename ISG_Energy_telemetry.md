@@ -6,7 +6,7 @@
 
 | Способ | Адрес | Когда использовать |
 |---|---|---|
-| **WebSocket (поток)** | `ws://<сервер>:8000/ws/telemetry` | основной канал: сервер сам присылает срез раз в секунду и сообщения терминала |
+| **WebSocket (поток)** | `ws://<сервер>:8000/ws/telemetry` | основной канал: сервер сам присылает срез каждые 2 с и сообщения терминала |
 | **HTTP REST (опрос)** | `http://<сервер>:8000/api/telemetry...` | если WebSocket неудобен, для разовых запросов, для загрузки истории и прогноза |
 
 Все ответы — JSON в кодировке UTF-8. Подключение только на чтение: через телеметрию нельзя
@@ -53,7 +53,7 @@
   Реально измеренные реле значения передаются отдельно в `lines[].measured`.
 * **Ток и А·ч АКБ** пересчитываются из мощности и энергии через номинальное напряжение АКБ:
   `I = P / U`, `А·ч = Вт·ч / U`. Напряжение каждой АКБ передаётся в `voltage_v`
-  (по умолчанию 48 В, `telemetry.battery_voltage_v`; для отдельной АКБ — `voltage_v` в сценарии).
+  (сейчас 24 В, `telemetry.battery_voltage_v`; для отдельной АКБ — `voltage_v` в сценарии).
 * **Знак тока и мощности АКБ:** `> 0` — заряд, `< 0` — разряд.
 * **Время купола.** На игре оно совпадает с реальным местным временем. При отладке (`clock.mode: sim`)
   время купола идёт быстрее (`speed`, например ×20), поэтому для оси X графиков используйте
@@ -77,7 +77,7 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
 |---|---|---|
 | `hello` | сразу после подключения | справочник: линии, источники, АКБ, параметры дня — см. [5.2](#52-справочник-get-apitelemetrymeta--hello) |
 | `forecast` | сразу после `hello` | прогноз генерации W(t) на весь игровой день, шаг 15 мин — см. [5.3](#53-прогноз-генерации-wt-get-apitelemetryforecast) |
-| `telemetry` | каждые `push_interval_s` (1 с) | текущий срез — см. [5.1](#51-текущий-срез-get-apitelemetry--telemetry) |
+| `telemetry` | каждые `push_interval_s` (сейчас 2 с, приходит в `hello`) | текущий срез — см. [5.1](#51-текущий-срез-get-apitelemetry--telemetry) |
 | `message` | при новом сообщении терминала | события игры: фазы, аварии, отключения — см. [3.2](#32-сообщения-терминала-message) |
 | `pong`, `history`, `error` | в ответ на запросы клиента | см. ниже |
 
@@ -98,10 +98,11 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
 
 ```json
 {"type": "message", "n": 42, "ts": "2026-10-07 12:00:00", "level": "CRIT",
- "text": "ТРЕВОГА! Песчаная буря накрыла купол. Генерация солнечных панелей упала. ..."}
+ "text": "ALERT! A sandstorm has engulfed the dome. Solar panel output has dropped. ..."}
 ```
 
 `level`: `INFO`, `WARN`, `CRIT`, `OK`. `n` — сквозной номер сообщения за день.
+Тексты сообщений — на английском (их же видят участники).
 В поток попадают только сообщения, появившиеся после подключения. Весь журнал дня можно получить
 через `GET /api/terminal?after=0` (без токена, это API панели участников).
 
@@ -132,7 +133,7 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
 * `403` — неверный токен;
 * `503` — сервер только что запустился и ещё не посчитал первый такт, повторите через секунду.
 
-Данные обновляются раз в секунду, чаще опрашивать `/api/telemetry` смысла нет.
+Данные обновляются раз в `engine_tick_s` (сейчас 2 с), чаще опрашивать `/api/telemetry` смысла нет.
 
 ---
 
@@ -148,12 +149,12 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
   "ts": 1791363192.481,
   "game_time": "2026-10-07T09:03:12",
   "game_status": "running",
-  "phase": "Утренний запуск",
+  "phase": "Morning start-up",
 
   "generation": {
     "total_w": 5268.0,
     "sources": [
-      {"id": "solar", "name": "Солнечные панели", "type": "solar",
+      {"id": "solar", "name": "Solar panels", "type": "solar",
        "power_w": 5268.0, "forecast_w": 4959.7, "sigma_w": 1092.8}
     ]
   },
@@ -166,21 +167,21 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
   "deficit_w": 0.0,
 
   "lines": [
-    {"id": 1, "name": "Линия 1", "on": false, "online": true, "status": "tripped",
-     "power_w": 0.0, "reason": "Перегруз: аварийное отключение", "until": "09:10",
+    {"id": 1, "key": "HAB1-S", "name": "Habitat 1 · Sockets", "on": false, "online": true,
+     "status": "tripped", "power_w": 0.0, "reason": "Overload: emergency trip", "until": "09:10",
      "measured": {"power_w": 0.0, "voltage_v": 230.0, "current_a": 0.0}},
-    {"id": 2, "name": "Линия 2", "on": true, "online": true, "status": "on",
-     "power_w": 951.0, "reason": null, "until": null,
+    {"id": 12, "key": "BIO-L", "name": "Bioreactor · Lighting", "on": true, "online": true,
+     "status": "on", "power_w": 951.0, "reason": null, "until": null,
      "measured": {"power_w": 47.5, "voltage_v": 229.8, "current_a": 0.207}}
   ],
 
   "active_battery": "A",
   "batteries": [
-    {"id": "A", "name": "АКБ-1 Литий-ион", "active": true, "status": "ok",
-     "voltage_v": 48.0,
-     "capacity_ah": 416.67, "nominal_ah": 416.67, "available_ah": 246.84, "soc_pct": 59.2,
-     "current_a": -49.97, "power_w": -2398.5, "mode": "discharge",
-     "max_charge_a": 83.33, "max_discharge_a": 83.33, "peak_discharge_a": 125.0,
+    {"id": "A", "name": "BAT-1 Li-ion", "active": true, "status": "ok",
+     "voltage_v": 24.0,
+     "capacity_ah": 833.33, "nominal_ah": 833.33, "available_ah": 493.68, "soc_pct": 59.2,
+     "current_a": -99.94, "power_w": -2398.5, "mode": "discharge",
+     "max_charge_a": 166.67, "max_discharge_a": 166.67, "peak_discharge_a": 250.0,
      "fault_until": null}
   ]
 }
@@ -212,7 +213,7 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
 | Поле | Описание |
 |---|---|
 | `consumption.total_w` | суммарное потребление включённых линий, Вт |
-| `consumption.corridor.min_w`, `max_w` | допустимый коридор потребления в текущей фазе, Вт. Выход за коридор — нарушение |
+| `consumption.corridor.min_w`, `max_w` | допустимый коридор потребления сейчас, Вт. Задаётся фазой сценария, организатор может временно переопределить любую границу. Выход за коридор — нарушение |
 | `balance_w` | генерация − потребление. `> 0` — излишек идёт в активную АКБ, `< 0` — АКБ разряжается |
 | `deficit_w` | мощность, которую не покрыли ни генерация, ни АКБ. `> 0` — авария, скоро отключение линий |
 
@@ -220,10 +221,12 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
 
 | Поле | Описание |
 |---|---|
-| `id`, `name` | номер (1–12) и название линии |
+| `id` | номер линии (реле), 1–13 |
+| `key` | ключ потребителя (`HAB1-S`, `BIO-L`, … — см. [5.5](#55-линии-и-потребители)) или `null`, если линия ни к кому не привязана |
+| `name` | название потребителя на английском (как у участников), например `Habitat 1 · Sockets` |
 | `on` | реле включено (`true`) / выключено (`false`) |
 | `online` | реле отвечает. Если `false`, мощность линии неизвестна и в сумму не входит |
-| `status` | `on`, `off`, `locked` (заблокирована сценарием), `tripped` (аварийно отключена защитой), `offline` (нет связи с реле) |
+| `status` | `on`, `off`, `locked` (заблокирована сценарием или организатором), `tripped` (аварийно отключена защитой), `offline` (нет связи с реле) |
 | `power_w` | потребляемая мощность линии, Вт купола (0, если выключена) |
 | `reason`, `until` | причина блокировки и время купола `HH:MM`, до которого она действует (для `locked`/`tripped`), иначе `null` |
 | `measured` | реальные показания реле: `power_w` (Вт), `voltage_v` (В), `current_a` (А). `null`, если реле не на связи |
@@ -256,21 +259,29 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
 {
   "type": "hello",
   "schema": 1,
-  "day": "День 1 — Развёртывание базы",
+  "day": "Day 1 — Base Deployment",
   "scenario": "day1",
   "day_start": "08:00",
   "day_end": "20:00",
   "clock": {"mode": "real", "speed": 1.0},
-  "push_interval_s": 1.0,
-  "lines": [{"id": 1, "name": "Линия 1"}, {"id": 2, "name": "Линия 2"}],
-  "sources": [{"id": "solar", "name": "Солнечные панели", "type": "solar"}],
+  "push_interval_s": 2.0,
+  "lines": [
+    {"id": 1, "name": "Habitat 1 · Sockets", "key": "HAB1-S"},
+    {"id": 2, "name": "Habitat 2 · Sockets", "key": "HAB2-S"},
+    "…",
+    {"id": 13, "name": "Control · Lighting", "key": "CTL-L"}
+  ],
+  "sources": [{"id": "solar", "name": "Solar panels", "type": "solar"}],
   "batteries": [
-    {"id": "A", "name": "АКБ-1 Литий-ион", "voltage_v": 48.0, "nominal_ah": 416.67},
-    {"id": "B", "name": "АКБ-2 Свинцово-кислотный", "voltage_v": 48.0, "nominal_ah": 250.0},
-    {"id": "C", "name": "Суперконденсатор", "voltage_v": 48.0, "nominal_ah": 62.5}
+    {"id": "A", "name": "BAT-1 Li-ion", "voltage_v": 24.0, "nominal_ah": 833.33},
+    {"id": "B", "name": "BAT-2 Lead-acid", "voltage_v": 24.0, "nominal_ah": 500.0},
+    {"id": "C", "name": "Supercapacitor", "voltage_v": 24.0, "nominal_ah": 125.0}
   ]
 }
 ```
+
+`lines` всегда содержит все 13 линий. Названия и ключи — текущая привязка на момент запроса
+(см. [5.5](#55-линии-и-потребители)).
 
 ### 5.3. Прогноз генерации W(t): `GET /api/telemetry/forecast`
 
@@ -331,14 +342,47 @@ GET /api/telemetry/history?since=600.5   только точки с t > 600.5
      "generation_w": 5268.0, "consumption_w": 7667.0,
      "corridor": {"min_w": 3000.0, "max_w": 8000.0},
      "active_battery": "A",
-     "lines_w": {"1": 0.0, "2": 951.0, "3": 0.0, "4": 562.0, "5": 673.0, "6": 1015.0,
-                 "7": 1346.0, "8": 383.0, "9": 820.0, "10": 687.0, "11": 955.0, "12": 276.0},
-     "batteries_ah": {"A": 247.12, "B": 166.67, "C": 41.52}}
+     "lines_w": {"1": 0.0, "2": 951.0, "3": 0.0, "4": 562.0, "5": 673.0, "6": 1015.0, "7": 1346.0,
+                 "8": 383.0, "9": 820.0, "10": 687.0, "11": 955.0, "12": 276.0, "13": 310.0},
+     "batteries_ah": {"A": 494.24, "B": 333.33, "C": 83.04}}
   ]
 }
 ```
 
-`lines_w` — мощность каждой линии (ключ — `id` линии строкой), `batteries_ah` — доступная ёмкость каждой АКБ.
+`lines_w` — мощность каждой линии (ключ — `id` линии строкой, `"1"`–`"13"`), `batteries_ah` — доступная
+ёмкость каждой АКБ. В истории линии идут по номерам; чтобы подписать их, берите `name`/`key` из `hello`.
+
+### 5.5. Линии и потребители
+
+В куполе 13 линий (реле). Каждая питает одного потребителя:
+
+| `key` | `name` | Что это |
+|---|---|---|
+| `HAB1-S` | Habitat 1 · Sockets | розетки жилого модуля 1 |
+| `HAB2-S` | Habitat 2 · Sockets | розетки жилого модуля 2 |
+| `WS-S1` | Workshop · Sockets 1 | розетки мастерской, линия 1 |
+| `WS-S2` | Workshop · Sockets 2 | розетки мастерской, линия 2 |
+| `BIO-S1` | Bioreactor · Sockets 1 | розетки модуля биореактора, линия 1 |
+| `BIO-S2` | Bioreactor · Sockets 2 | розетки модуля биореактора, линия 2 |
+| `CTL-S1` | Control · Sockets 1 | розетки модуля управления, линия 1 |
+| `CTL-S2` | Control · Sockets 2 | розетки модуля управления, линия 2 |
+| `HAB1-L` | Habitat 1 · Lighting | освещение жилого модуля 1 |
+| `HAB2-L` | Habitat 2 · Lighting | освещение жилого модуля 2 |
+| `WS-L` | Workshop · Lighting | освещение мастерской |
+| `BIO-L` | Bioreactor · Lighting | освещение модуля биореактора |
+| `CTL-L` | Control · Lighting | освещение модуля управления |
+
+**Какое реле (`id`) питает какого потребителя, определяется на площадке при монтаже**, и организатор
+может поменять привязку в любой момент. Поэтому:
+
+* опознавайте потребителя по `key`, а не по `id`: `id` — это номер реле, он не несёт смысла;
+* не кэшируйте соответствие `id → key` навсегда — берите его из каждого среза (`lines[].key`)
+  или перезапрашивайте `get_meta` / `GET /api/telemetry/meta`;
+* в истории (`lines_w`) данные хранятся по `id` реле. Если привязку поменяли в течение дня,
+  старые точки остаются за тем же реле.
+
+Чтобы сгруппировать данные по модулям, разбирайте `key`: префикс `HAB1`, `HAB2`, `WS`, `BIO`, `CTL` —
+модуль, суффикс `S…` — розетки, `L` — освещение.
 
 ---
 
@@ -421,7 +465,7 @@ history = requests.get(f"{BASE}/api/telemetry/history", headers=H).json()
 while True:
     s = requests.get(f"{BASE}/api/telemetry", headers=H, timeout=3).json()
     for line in s["lines"]:
-        print(line["id"], line["status"], line["power_w"])
+        print(line["key"], line["name"], line["status"], line["power_w"])
     time.sleep(1)
 ```
 
@@ -439,7 +483,7 @@ curl -H "X-Telemetry-Token: secret" http://192.168.1.50:8000/api/telemetry/histo
 
 | Что запросил ЦУП | Где взять |
 |---|---|
-| Состояние линий вкл/выкл | `lines[].on`, подробнее — `lines[].status` |
+| Состояние линий вкл/выкл | `lines[].on`, подробнее — `lines[].status`; чья линия — `lines[].key` / `name` |
 | Потребляемая мощность линий, Вт | `lines[].power_w`, сумма — `consumption.total_w` |
 | Текущая генерация по источникам, Вт | `generation.sources[].power_w` (сейчас `solar`), сумма — `generation.total_w` |
 | АКБ: доступная ёмкость, А·ч | `batteries[].available_ah` |

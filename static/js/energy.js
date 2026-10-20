@@ -72,7 +72,7 @@ function buildLines(lines) {
     btnEls.push(b);
   });
 }
-const BADGE = { on: 'ВКЛ', off: 'ВЫКЛ', locked: 'БЛОК', tripped: 'АВАРИЯ', offline: 'НЕТ СВЯЗИ' };
+const BADGE = { on: 'ON', off: 'OFF', locked: 'LOCKED', tripped: 'TRIPPED', offline: 'NO LINK' };
 function updateLines() {
   const lines = state.snap.lines;
   if (btnEls.length !== lines.length) { buildLines(lines); buildLineChips(lines); }
@@ -81,11 +81,11 @@ function updateLines() {
     b.className = 'line-btn ' + (l.on ? 'is-on ' : 'is-off ') + 'is-' + l.status;
     b.querySelector('.lb-name').textContent = l.name;
     b.querySelector('.lb-badge').textContent = BADGE[l.status] || l.status;
-    b.querySelector('.lb-kw').innerHTML = (l.on ? l.kw.toFixed(2) : '—') + ' <small>кВт</small>';
-    b.querySelector('.lb-reason').textContent = l.reason ? l.reason + (l.until ? ' · до ' + l.until : '') : '';
+    b.querySelector('.lb-kw').innerHTML = (l.on ? l.kw.toFixed(2) : '—') + ' <small>kW</small>';
+    b.querySelector('.lb-reason').textContent = l.reason ? l.reason + (l.until ? ' · until ' + l.until : '') : '';
     const blocked = (l.status === 'locked' || l.status === 'tripped') && !l.on;
     b.disabled = blocked || l.status === 'offline';
-    b.title = blocked ? 'Линию нельзя включить: ' + l.reason : (l.on ? 'Выключить' : 'Включить') + ' ' + l.name;
+    b.title = blocked ? 'Line cannot be switched on: ' + l.reason : (l.on ? 'Switch off' : 'Switch on') + ' ' + l.name;
     b.setAttribute('aria-pressed', l.on);
   });
 }
@@ -106,7 +106,7 @@ async function toggleLine(i) {
 }
 
 // ---------------------------------------------------------------- АКБ
-const STATUS_RU = { ok: 'НОРМА', degraded: 'ДЕГРАДАЦИЯ', fault: 'ЗАЩИТА', failed: 'ОТКАЗ' };
+const STATUS_TXT = { ok: 'OK', degraded: 'DEGRADED', fault: 'PROTECTION', failed: 'FAILED' };
 const batEls = {};
 function updateBatteries() {
   const wrap = $('batteries');
@@ -132,7 +132,7 @@ function updateBatteries() {
     el.querySelector('.bat-name').textContent = b.name;
     const st = el.querySelector('.bat-st');
     st.className = 'bat-st ' + b.status;
-    st.textContent = (STATUS_RU[b.status] || b.status) + (b.fault_until ? ' до ' + b.fault_until.slice(0, 5) : '');
+    st.textContent = (STATUS_TXT[b.status] || b.status) + (b.fault_until ? ' until ' + b.fault_until.slice(0, 5) : '');
     el.querySelector('.bat-desc').textContent = b.description || '';
 
     const fill = el.querySelector('.fill');
@@ -144,17 +144,17 @@ function updateBatteries() {
     bar.setAttribute('aria-valuemax', b.capacity_kwh);
     bar.setAttribute('aria-valuenow', b.charge_kwh.toFixed(2));
     el.querySelector('.bar-txt').textContent =
-      b.charge_kwh.toFixed(1) + ' / ' + b.capacity_kwh.toFixed(1) + ' кВт·ч · ' + Math.round(b.soc * 100) + '%';
+      b.charge_kwh.toFixed(1) + ' / ' + b.capacity_kwh.toFixed(1) + ' kWh · ' + Math.round(b.soc * 100) + '%';
     const flow = el.querySelector('.flow');
     flow.hidden = Math.abs(b.power_kw) < 0.01;
     flow.classList.toggle('out', b.power_kw < 0);
 
     const pw = el.querySelector('.pw');
-    if (b.power_kw > 0.01) pw.innerHTML = '<b class="in">▲ заряд ' + b.power_kw.toFixed(2) + ' кВт</b>';
-    else if (b.power_kw < -0.01) pw.innerHTML = '<b class="out">▼ разряд ' + (-b.power_kw).toFixed(2) + ' кВт</b>';
-    else pw.textContent = active ? 'простой' : 'резерв';
+    if (b.power_kw > 0.01) pw.innerHTML = '<b class="in">▲ charging ' + b.power_kw.toFixed(2) + ' kW</b>';
+    else if (b.power_kw < -0.01) pw.innerHTML = '<b class="out">▼ discharging ' + (-b.power_kw).toFixed(2) + ' kW</b>';
+    else pw.textContent = active ? 'idle' : 'standby';
     el.querySelector('.lim').textContent =
-      'заряд ≤' + b.max_charge_kw + ' · разряд ≤' + b.max_discharge_kw + ' (пик ' + (+b.peak_discharge_kw).toFixed(1) + ') кВт';
+      'charge ≤' + b.max_charge_kw + ' · discharge ≤' + b.max_discharge_kw + ' (peak ' + (+b.peak_discharge_kw).toFixed(1) + ') kW';
   });
 }
 async function selectBattery(id) {
@@ -170,21 +170,21 @@ function updateKpis() {
   const s = state.snap;
   $('clock').textContent = s.now;
   $('dayName').textContent = s.day;
-  $('phaseName').textContent = s.status === 'before' ? 'ожидание начала смены'
-    : s.status === 'finished' ? 'день завершён' : (s.phase || 'штатный режим');
-  $('kGen').innerHTML = kw(s.gen) + '<small>кВт</small>';
-  $('kCons').innerHTML = kw(s.cons) + '<small>кВт</small>';
-  $('kNet').innerHTML = (s.net > 0 ? '+' : '') + kw(s.net) + '<small>кВт</small>';
-  $('kCorr').innerHTML = s.corridor.min.toFixed(1) + '–' + s.corridor.max.toFixed(1) + '<small>кВт</small>';
+  $('phaseName').textContent = s.status === 'before' ? 'waiting for the shift to start'
+    : s.status === 'finished' ? 'day finished' : (s.phase || 'normal operation');
+  $('kGen').innerHTML = kw(s.gen) + '<small>kW</small>';
+  $('kCons').innerHTML = kw(s.cons) + '<small>kW</small>';
+  $('kNet').innerHTML = (s.net > 0 ? '+' : '') + kw(s.net) + '<small>kW</small>';
+  $('kCorr').innerHTML = s.corridor.min.toFixed(1) + '–' + s.corridor.max.toFixed(1) + '<small>kW</small>';
   const box = $('kCorrBox'), st = $('kCorrState');
   const over = s.cons > s.corridor.max, under = s.cons < s.corridor.min;
   box.className = 'kpi corridor-kpi ' + (over || under ? 'st-bad' : 'st-ok');
-  st.textContent = over ? '▲ ПЕРЕГРУЗ' : under ? '▼ НИЖЕ ПОРОГА' : '✓ в коридоре';
+  st.textContent = over ? '▲ OVERLOAD' : under ? '▼ BELOW THRESHOLD' : '✓ in corridor';
 
   $('alarms').innerHTML = (s.alarms || []).map(a =>
-    '<div class="alarm">⚠ ' + esc(a.title) + ': до срабатывания защиты<b>' + Math.ceil(a.left_s) + ' с</b></div>').join('');
+    '<div class="alarm">⚠ ' + esc(a.title) + ': protection trips in<b>' + Math.ceil(a.left_s) + ' s</b></div>').join('');
   const st2 = s.stats;
-  $('termStats').textContent = 'нарушения ▲' + st2.overload + ' ▼' + st2.underload + ' ⚡' + st2.deficit;
+  $('termStats').textContent = 'violations ▲' + st2.overload + ' ▼' + st2.underload + ' ⚡' + st2.deficit;
 }
 
 // ---------------------------------------------------------------- переключатели графика
@@ -200,10 +200,10 @@ function chip(label, color, swClass, checked, onChange) {
 }
 function buildSeriesToggles() {
   const wrap = $('seriesToggles');
-  [['forecast', 'Прогноз ± σ', C.forecast, 'dashed'],
-   ['gen', 'Генерация', C.gen, ''],
-   ['cons', 'Потребление', C.cons, ''],
-   ['corridor', 'Ограничения (коридор)', C.limit, 'dashed']].forEach(([k, label, color, sw]) => {
+  [['forecast', 'Forecast ± σ', C.forecast, 'dashed'],
+   ['gen', 'Generation', C.gen, ''],
+   ['cons', 'Consumption', C.cons, ''],
+   ['corridor', 'Limits (corridor)', C.limit, 'dashed']].forEach(([k, label, color, sw]) => {
     wrap.appendChild(chip(label, color, sw, state.show[k], v => { state.show[k] = v; }));
   });
 }
@@ -297,7 +297,7 @@ function renderChart() {
     g.appendChild(t);
   }
   const unit = svgEl('text', { x: PAD.l - 6, y: 10, 'text-anchor': 'end' });
-  unit.textContent = 'кВт';
+  unit.textContent = 'kW';
   g.appendChild(unit);
   svg.appendChild(g);
 
@@ -335,7 +335,7 @@ function renderChart() {
     layer.appendChild(svgEl('path', { class: 'limit-zone', d: path(minPts) + ' L' + X(now) + ',' + Y(0) + ' L' + X(h[0].t) + ',' + Y(0) + ' Z' }));
     layer.appendChild(svgEl('path', { class: 'limit', d: path(maxPts) }));
     layer.appendChild(svgEl('path', { class: 'limit', d: path(minPts) }));
-    labels.push([Y(s.corridor.max), 'макс ' + s.corridor.max.toFixed(1)], [Y(s.corridor.min), 'мин ' + s.corridor.min.toFixed(1)]);
+    labels.push([Y(s.corridor.max), 'max ' + s.corridor.max.toFixed(1)], [Y(s.corridor.min), 'min ' + s.corridor.min.toFixed(1)]);
   }
 
   function series(get, color, cls, label) {
@@ -387,16 +387,16 @@ function initHover() {
       let best = h[0];
       for (const p of h) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
       tt = best.t;
-      if (state.show.gen) html += row(C.gen, '', 'Генерация', kw(best.gen) + ' кВт');
-      if (state.show.cons) html += row(C.cons, '', 'Потребление', kw(best.cons) + ' кВт');
-      if (state.show.corridor) html += row(C.limit, 'dashed', 'Коридор', best.min.toFixed(1) + '–' + best.max.toFixed(1) + ' кВт');
+      if (state.show.gen) html += row(C.gen, '', 'Generation', kw(best.gen) + ' kW');
+      if (state.show.cons) html += row(C.cons, '', 'Consumption', kw(best.cons) + ' kW');
+      if (state.show.corridor) html += row(C.limit, 'dashed', 'Corridor', best.min.toFixed(1) + '–' + best.max.toFixed(1) + ' kW');
       state.activeLines.forEach(i => {
         const st = lineStyle(i);
-        html += row(st.color, st.dash, state.snap.lines[i].name, kw(best.per[i] || 0) + ' кВт');
+        html += row(st.color, st.dash, state.snap.lines[i].name, kw(best.per[i] || 0) + ' kW');
       });
     }
     const fc = state.show.forecast ? forecastAt(tt) : null;
-    if (fc) html += row(C.forecast, 'dashed', 'Прогноз', fc.mean.toFixed(2) + ' ± ' + fc.sd.toFixed(2) + ' кВт');
+    if (fc) html += row(C.forecast, 'dashed', 'Forecast', fc.mean.toFixed(2) + ' ± ' + fc.sd.toFixed(2) + ' kW');
     if (!html) { tip.hidden = true; return; }
     tip.innerHTML = '<div class="tip-time">' + fmtHM(tt) + '</div>' + html;
     tip.hidden = false;
@@ -416,7 +416,7 @@ function buildTable() {
   const det = document.querySelector('.tbl');
   if (!det.open) return;
   const h = state.history.slice(-240).reverse();
-  let html = '<thead><tr><th>Время</th><th>Генерация</th><th>Прогноз</th><th>Потребление</th><th>Мин</th><th>Макс</th>';
+  let html = '<thead><tr><th>Time</th><th>Generation</th><th>Forecast</th><th>Consumption</th><th>Min</th><th>Max</th>';
   state.activeLines.forEach(i => html += '<th>' + esc(state.snap.lines[i].name) + '</th>');
   html += '</tr></thead><tbody>';
   h.forEach(p => {
@@ -489,10 +489,10 @@ async function pollState() {
       await loadHistory(); // время ушло назад (перемотка/новый день)
     }
     updateLines(); updateBatteries(); updateKpis(); renderChart(); buildTable();
-    $('upd').textContent = 'связь с куполом' + (s.speed !== 1 ? ' · ускорение ×' + s.speed : '');
+    $('upd').textContent = 'linked to dome' + (s.speed !== 1 ? ' · speed ×' + s.speed : '');
     $('liveDot').classList.remove('lost');
   } catch (e) {
-    $('upd').textContent = 'нет связи с куполом';
+    $('upd').textContent = 'no link to dome';
     $('liveDot').classList.add('lost');
   }
 }

@@ -34,7 +34,7 @@ class GameClock:
     def set_time(self, hhmm: str) -> None:
         """Перемотка (только в режиме sim) — удобно при отладке сценария."""
         if self.mode != "sim":
-            raise RuntimeError("Перемотка доступна только в режиме sim")
+            raise RuntimeError("Перемотка доступна только в режиме clock.mode: sim")
         hh, mm = (int(x) for x in hhmm.split(":"))
         with self._lock:
             self._game_t0 = datetime.combine(self._game_t0.date(), datetime.min.time()) + timedelta(hours=hh, minutes=mm)

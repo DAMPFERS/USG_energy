@@ -51,7 +51,7 @@ class Telemetry:
 
     def check(self, token: str | None):
         if self.token and token != self.token:
-            raise HTTPException(403, "Неверный токен телеметрии")
+            raise HTTPException(403, "Invalid telemetry token")
 
     def _volt(self, b) -> float:
         return float(b.voltage_v or self.voltage)
@@ -65,8 +65,8 @@ class Telemetry:
             "day_start": _hhmm(e.sc.start), "day_end": _hhmm(e.sc.end),
             "clock": {"mode": e.clock.mode, "speed": e.clock.speed},
             "push_interval_s": self.push_interval,
-            "lines": [{"id": lid, "name": ls.name} for lid, ls in e.lines.items()],
-            "sources": [{"id": "solar", "name": "Солнечные панели", "type": "solar"}],
+            "lines": [{"id": lid, "name": e.name(lid), "key": e.map.key(lid)} for lid in e.lines],
+            "sources": [{"id": "solar", "name": "Solar panels", "type": "solar"}],
             "batteries": [{"id": b.id, "name": b.name, "voltage_v": self._volt(b),
                            "nominal_ah": round(b.nominal_kwh * 1000 / self._volt(b), 2)}
                           for b in e.batteries.values()],
@@ -86,7 +86,7 @@ class Telemetry:
         for l in s["lines"]:
             r = readings.get(l["id"])
             lines.append({
-                "id": l["id"], "name": l["name"], "on": l["on"], "online": l["online"],
+                "id": l["id"], "name": l["name"], "key": l.get("key"), "on": l["on"], "online": l["online"],
                 "status": l["status"], "power_w": _w(l["kw"]),
                 "reason": l["reason"] or None, "until": l["until"],
                 "measured": {"power_w": round(r.raw_w, 1), "voltage_v": round(r.voltage, 1),
@@ -120,7 +120,7 @@ class Telemetry:
             "game_status": s["status"], "phase": s["phase"],
             "generation": {
                 "total_w": _w(s["gen"]),
-                "sources": [{"id": "solar", "name": "Солнечные панели", "type": "solar",
+                "sources": [{"id": "solar", "name": "Solar panels", "type": "solar",
                              "power_w": _w(s["gen"]), "forecast_w": _w(fc_kw), "sigma_w": _w(fc_sd)}],
             },
             "consumption": {"total_w": _w(s["cons"]),
@@ -138,9 +138,9 @@ class Telemetry:
         b = hhmm_to_min(t_to) if t_to else e.sc.end
         step = float(step_min or self.forecast_step)
         if step <= 0 or b < a:
-            raise ValueError("Неверный интервал или шаг")
+            raise ValueError("Invalid interval or step")
         if (b - a) / step > 2000:
-            raise ValueError("Слишком много точек (больше 2000) — увеличьте step_min")
+            raise ValueError("Too many points (over 2000), increase step_min")
         points, m = [], float(a)
         while m <= b + 1e-9:
             kw, sd = e.forecast.at(m)
@@ -181,7 +181,7 @@ def install(app: FastAPI, engine: Engine, cfg: dict | None):
         tm.check(x_telemetry_token or token)
         snap = tm.snapshot()
         if snap is None:
-            raise HTTPException(503, "Движок ещё не запущен, повторите через секунду")
+            raise HTTPException(503, "Engine is not running yet, retry in a second")
         return snap
 
     @app.get("/api/telemetry/meta")
@@ -209,7 +209,7 @@ def install(app: FastAPI, engine: Engine, cfg: dict | None):
     async def ws_telemetry(ws: WebSocket):
         tok = ws.query_params.get("token") or ws.headers.get("x-telemetry-token")
         if tm.token and tok != tm.token:
-            await ws.close(code=1008, reason="Неверный токен телеметрии")
+            await ws.close(code=1008, reason="Invalid telemetry token")
             return
         await ws.accept()
         peer = f"{ws.client.host}:{ws.client.port}" if ws.client else "?"
@@ -235,7 +235,7 @@ def install(app: FastAPI, engine: Engine, cfg: dict | None):
                     elif kind == "get_meta":
                         await ws.send_json({"type": "hello", **tm.meta()})
                     else:
-                        await ws.send_json({"type": "error", "error": f"Неизвестный запрос: {kind}"})
+                        await ws.send_json({"type": "error", "error": f"Unknown request: {kind}"})
                 except ValueError as e:
                     await ws.send_json({"type": "error", "error": str(e)})
 

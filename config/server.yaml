@@ -22,38 +22,85 @@ clock:
 #   WS  /ws/telemetry
 telemetry:
   token: ""                 # пусто — без авторизации; иначе X-Telemetry-Token или ?token=
-  push_interval_s: 1.0      # период отправки среза по WebSocket (реальные секунды)
-  battery_voltage_v: 48     # номинальное напряжение АКБ для пересчёта в А и А·ч (в сценарии можно задать voltage_v у АКБ)
+  push_interval_s: 2.0      # период отправки среза по WebSocket (реальные секунды)
+  battery_voltage_v: 24     # номинальное напряжение АКБ для пересчёта в А и А·ч (в сценарии можно задать voltage_v у АКБ)
   forecast_step_min: 15     # шаг прогноза W(t) по умолчанию
   cors_origins: ["*"]       # с каких веб-страниц разрешены запросы GET (для панели ЦУП в браузере)
 
-relay_poll_s: 1.0     # период опроса реле
-engine_tick_s: 1.0    # период расчёта баланса
+relay_poll_s: 2.0     # период опроса реле
+engine_tick_s: 2.0    # период расчёта баланса
 
 solar:
   source: sim         # сейчас — пересчёт прогноза с разбросом; позже — реальные панели
-  interval_s: 1.0
+  interval_s: 2.0
   noise: 1.0          # множитель к sigma из прогноза (0 — генерация точно по прогнозу)
   correlation: 0.97   # 0..1, чем ближе к 1, тем плавнее «облака»
 
-# Линии. driver: sim — эмулятор, tuya — реальное реле TONGOU (данные из smart_rele/devices.json).
+# Потребители купола (ключ — для команд админки и сценария, name — что видят участники).
+# Какой линии (реле) соответствует какой потребитель, задаётся на площадке из админки:
+#   name <линия> <ключ>       → сохраняется в line_map (по умолчанию — по порядку списка)
+consumers:
+  - {key: HAB1-S, name: "Habitat 1 · Sockets"}
+  - {key: HAB2-S, name: "Habitat 2 · Sockets"}
+  - {key: WS-S1,  name: "Workshop · Sockets 1"}
+  - {key: WS-S2,  name: "Workshop · Sockets 2"}
+  - {key: BIO-S1, name: "Bioreactor · Sockets 1"}
+  - {key: BIO-S2, name: "Bioreactor · Sockets 2"}
+  - {key: CTL-S1, name: "Control · Sockets 1"}
+  - {key: CTL-S2, name: "Control · Sockets 2"}
+  - {key: HAB1-L, name: "Habitat 1 · Lighting"}
+  - {key: HAB2-L, name: "Habitat 2 · Lighting"}
+  - {key: WS-L,   name: "Workshop · Lighting"}
+  - {key: BIO-L,  name: "Bioreactor · Lighting"}
+  - {key: CTL-L,  name: "Control · Lighting"}
+line_map: config/line_map.yaml
+
+# Линии (реле) 1–13. driver: sim — эмулятор, tuya — реальное реле TONGOU (данные из smart_rele/devices.json).
 # scale: игровые кВт = измеренные реле кВт * scale (лампа 60 Вт при scale 20 = 1.2 кВт купола).
+# Пример реального реле:
+#   - {id: 1, driver: tuya, scale: 1, tuya: {device_id: "...", local_key: "...", ip: "192.168.8.89", version: 3.5}}
 lines:
-  - {id: 1,  name: "Линия 1",  driver: sim, sim: {base_kw: 1.2, variability: 0.08}}
-  - {id: 2,  name: "Линия 2",  driver: sim, sim: {base_kw: 0.9, variability: 0.05}}
-  - {id: 3,  name: "Линия 3",  driver: sim, sim: {base_kw: 1.6, variability: 0.15}}
-  - {id: 4,  name: "Линия 4",  driver: sim, sim: {base_kw: 0.5, variability: 0.03}}
-  - {id: 5,  name: "Линия 5",  driver: sim, sim: {base_kw: 0.7, variability: 0.06}}
-  - {id: 6,  name: "Линия 6",  driver: sim, sim: {base_kw: 1.1, variability: 0.10}}
-  - {id: 7,  name: "Линия 7",  driver: sim, sim: {base_kw: 1.4, variability: 0.12}}
-  - {id: 8,  name: "Линия 8",  driver: sim, sim: {base_kw: 0.4, variability: 0.02}}
-  - {id: 9,  name: "Линия 9",  driver: sim, sim: {base_kw: 0.8, variability: 0.07}}
-  - {id: 10, name: "Линия 10", driver: sim, sim: {base_kw: 0.6, variability: 0.05}}
-  - {id: 11, name: "Линия 11", driver: sim, sim: {base_kw: 1.0, variability: 0.09}}
-  - {id: 12, name: "Линия 12", driver: sim, sim: {base_kw: 0.3, variability: 0.02}}
-  # Пример реального реле:
-  # - id: 1
-  #   name: "Линия 1"
-  #   driver: tuya
-  #   scale: 20
-  #   tuya: {device_id: "bfb1c8ae96a0f61b84fphs", local_key: "<local key>", ip: "192.168.137.193", version: 3.5}
+  - {id: 1,  driver: sim, sim: {base_kw: 1.0, variability: 0.08}}
+  - {id: 2,  driver: sim, sim: {base_kw: 0.9, variability: 0.05}}
+  - {id: 3,  driver: sim, sim: {base_kw: 1.6, variability: 0.15}}
+  - {id: 4,  driver: sim, sim: {base_kw: 1.2, variability: 0.10}}
+  - {id: 5,  driver: sim, sim: {base_kw: 1.1, variability: 0.06}}
+  - {id: 6,  driver: sim, sim: {base_kw: 0.8, variability: 0.05}}
+  - {id: 7,  driver: sim, sim: {base_kw: 1.3, variability: 0.12}}
+  - {id: 8,  driver: sim, sim: {base_kw: 0.7, variability: 0.05}}
+  - {id: 9,  driver: sim, sim: {base_kw: 0.4, variability: 0.02}}
+  - {id: 10, driver: sim, sim: {base_kw: 0.3, variability: 0.02}}
+  - {id: 11, driver: sim, sim: {base_kw: 0.5, variability: 0.03}}
+  - {id: 12, driver: sim, sim: {base_kw: 0.4, variability: 0.02}}
+  - {id: 13, driver: sim, sim: {base_kw: 0.3, variability: 0.02}}
+
+# Реальные реле (для перехода на железо — перенести нужные строки в lines и указать id 1–13)
+# 1й щиток
+# lines:
+#   - {id: 1,  name: "Линия 1",  driver: tuya, scale: 1, tuya: {device_id: "bfa0b22d189059bb59aymo", local_key: "&K`}2Y)fJn;EPS|J", ip: "192.168.8.73", version: 3.5}}
+#   - {id: 2,  name: "Линия 2", driver: tuya, scale: 1, tuya: {device_id: "bf3b2511937c4e33298lkd", local_key: "e)H#3XIe[.1Na[t'", ip: "192.168.8.86", version: 3.5}}
+#   - {id: 3,  name: "Линия 3", driver: tuya, scale: 1, tuya: {device_id: "bf1e390576573dac1acgmn", local_key: "Akyh;z_rO3t=]2=C", ip: "192.168.8.75", version: 3.5}}
+#   - {id: 4,  name: "Линия 4",  driver: tuya, scale: 1, tuya: {device_id: "bfe270aa8fcdd6ad16zhqz", local_key: "+K{E'#RGyx*qh=[h", ip: "192.168.8.76", version: 3.5}}
+#   - {id: 5,  name: "Линия 5",  driver: tuya, scale: 1, tuya: {device_id: "bfd48cd1e0ac0f0968nhxj", local_key: "<Pu8$vB?$P`3@w48", ip: "192.168.8.77", version: 3.5}}
+#   - {id: 6,  name: "Линия 6",  driver: tuya, scale: 1, tuya: {device_id: "bfaa3385b67a0cdbe0wiwo", local_key: "[<XAh_tU<L)*QF0A", ip: "192.168.8.78", version: 3.5}}
+#   - {id: 7,  name: "Линия 7",  driver: tuya, scale: 1, tuya: {device_id: "bf0dd8e6cb9485b047pgvf", local_key: "&h/?5-;)YC|.0SUU", ip: "192.168.8.79", version: 3.5}}
+#   - {id: 8,  name: "Линия 8",  driver: tuya, scale: 1, tuya: {device_id: "bf7e1560c925f2db088g2a", local_key: "Cs<o][5TqhQ+#@_l", ip: "192.168.8.88", version: 3.5}}
+#   - {id: 9,  name: "Линия 9",  driver: tuya, scale: 1, tuya: {device_id: "bf0a1968c335a2e2c6r30p", local_key: "uTb|kw;ZM`&esGnr", ip: "192.168.8.81", version: 3.5}}
+#   - {id: 10, name: "Линия 10",  driver: tuya, scale: 1, tuya: {device_id: "bf0826a3d2a603fefex5bq", local_key: "3/>f'g.lYrs}rFDn", ip: "192.168.8.82", version: 3.5}}
+#   - {id: 11, name: "Линия 11",  driver: tuya, scale: 1, tuya: {device_id: "bf782d238fb2624a39ofeh", local_key: "SJ&>]yGg!`h.={e|", ip: "192.168.8.83", version: 3.5}}
+#   - {id: 12, name: "Линия 12", driver: tuya, scale: 1, tuya: {device_id: "bf300250be9bf94b97w0by", local_key: "nCqbR+r@*kJ5H?!4", ip: "192.168.8.84", version: 3.5}}
+
+# 2й щиток
+# lines:
+#   - {id: 1,  name: "Линия 1",  driver: tuya, scale: 1, tuya: {device_id: "bfa7acde5a42e297a5htnd", local_key: "?-:h0.CN<o|@70;^", ip: "192.168.8.89", version: 3.5}}
+#   - {id: 2,  name: "Линия 2", driver: tuya, scale: 1, tuya: {device_id: "bf9f7a554c248407d3svoj", local_key: "]@.[$Psu+KVZAsnc", ip: "192.168.8.90", version: 3.5}}
+#   - {id: 3,  name: "Линия 3", driver: tuya, scale: 1, tuya: {device_id: "bfc4e6a8cdd9c2a6dbs8g2", local_key: "n5$YGZQ~Hw*'nRTQ", ip: "192.168.8.91", version: 3.5}}
+#   - {id: 4,  name: "Линия 4",  driver: tuya, scale: 1, tuya: {device_id: "bff42e47babbedfe78bzux", local_key: "120@RyM*3uQz-@+L", ip: "192.168.8.92", version: 3.5}}
+#   - {id: 5,  name: "Линия 5",  driver: tuya, scale: 1, tuya: {device_id: "bf8655068eaeb8faf7qngb", local_key: "2k7FUMU)x&*b5pD(", ip: "192.168.8.93", version: 3.5}}
+#   - {id: 6,  name: "Линия 6",  driver: tuya, scale: 1, tuya: {device_id: "bff6a69a33633f860cpy5p", local_key: "-+Ofef.h?s;oE;yn", ip: "192.168.8.94", version: 3.5}}
+#   - {id: 7,  name: "Линия 7",  driver: tuya, scale: 1, tuya: {device_id: "bf652ea4f5e08a641e0kwm", local_key: "luIo}[^rU-qXF/ZR", ip: "192.168.8.95", version: 3.5}}
+#   - {id: 8,  name: "Линия 8",  driver: tuya, scale: 1, tuya: {device_id: "bf0e96bbdf3bfefc8e5ggn", local_key: "A=X*JbW#LdVdaTl>", ip: "192.168.8.96", version: 3.5}}
+#   - {id: 9,  name: "Линия 9",  driver: tuya, scale: 1, tuya: {device_id: "bf69f018907ddd23d1pnxs", local_key: "#IO]*c+Yfa_yb4fI", ip: "192.168.8.97", version: 3.5}}
+#   - {id: 10, name: "Линия 10",  driver: tuya, scale: 1, tuya: {device_id: "bff09de7b4235d9b06lzzd", local_key: "VAL0lcU~6*(`ut1Y", ip: "192.168.8.98", version: 3.5}}
+#   - {id: 11, name: "Линия 11",  driver: tuya, scale: 1, tuya: {device_id: "bf8b5c5adc297beb5bw8bz", local_key: "ods<vOr-G3j<9t2S", ip: "192.168.8.99", version: 3.5}}
+#   - {id: 12, name: "Линия 12", driver: tuya, scale: 1, tuya: {device_id: "bf651a3c2067fa7121uxxy", local_key: "Rzuf{ha)@DGshq6:", ip: "192.168.8.100", version: 3.5}}

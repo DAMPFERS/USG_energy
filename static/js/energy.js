@@ -80,6 +80,7 @@ function updateLines() {
     const b = btnEls[i];
     b.className = 'line-btn ' + (l.on ? 'is-on ' : 'is-off ') + 'is-' + l.status;
     b.querySelector('.lb-name').textContent = l.name;
+    lineChipEls[i].querySelector('.chip-txt').textContent = l.name;
     b.querySelector('.lb-badge').textContent = BADGE[l.status] || l.status;
     b.querySelector('.lb-kw').innerHTML = (l.on ? l.kw.toFixed(2) : '—') + ' <small>kW</small>';
     b.querySelector('.lb-reason').textContent = l.reason ? l.reason + (l.until ? ' · until ' + l.until : '') : '';

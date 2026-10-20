@@ -167,10 +167,10 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
   "deficit_w": 0.0,
 
   "lines": [
-    {"id": 1, "key": "HAB1-S", "name": "Habitat 1 · Sockets", "on": false, "online": true,
+    {"id": 1, "key": "HAB1-S", "name": "HAB 1 · Sockets", "on": false, "online": true,
      "status": "tripped", "power_w": 0.0, "reason": "Overload: emergency trip", "until": "09:10",
      "measured": {"power_w": 0.0, "voltage_v": 230.0, "current_a": 0.0}},
-    {"id": 12, "key": "BIO-L", "name": "Bioreactor · Lighting", "on": true, "online": true,
+    {"id": 12, "key": "BIO-L", "name": "BIOLAB · Lighting", "on": true, "online": true,
      "status": "on", "power_w": 951.0, "reason": null, "until": null,
      "measured": {"power_w": 47.5, "voltage_v": 229.8, "current_a": 0.207}}
   ],
@@ -223,7 +223,7 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
 |---|---|
 | `id` | номер линии (реле), 1–13 |
 | `key` | ключ потребителя (`HAB1-S`, `BIO-L`, … — см. [5.5](#55-линии-и-потребители)) или `null`, если линия ни к кому не привязана |
-| `name` | название потребителя на английском (как у участников), например `Habitat 1 · Sockets` |
+| `name` | название потребителя на английском (как у участников), например `HAB 1 · Sockets` |
 | `on` | реле включено (`true`) / выключено (`false`) |
 | `online` | реле отвечает. Если `false`, мощность линии неизвестна и в сумму не входит |
 | `status` | `on`, `off`, `locked` (заблокирована сценарием или организатором), `tripped` (аварийно отключена защитой), `offline` (нет связи с реле) |
@@ -266,10 +266,10 @@ ws://<сервер>:8000/ws/telemetry?token=<токен>
   "clock": {"mode": "real", "speed": 1.0},
   "push_interval_s": 2.0,
   "lines": [
-    {"id": 1, "name": "Habitat 1 · Sockets", "key": "HAB1-S"},
-    {"id": 2, "name": "Habitat 2 · Sockets", "key": "HAB2-S"},
+    {"id": 1, "name": "HAB 1 · Sockets", "key": "HAB1-S"},
+    {"id": 2, "name": "HAB 2 · Sockets", "key": "HAB2-S"},
     "…",
-    {"id": 13, "name": "Control · Lighting", "key": "CTL-L"}
+    {"id": 13, "name": "MAIN · Lighting", "key": "MAIN-L"}
   ],
   "sources": [{"id": "solar", "name": "Solar panels", "type": "solar"}],
   "batteries": [
@@ -358,19 +358,19 @@ GET /api/telemetry/history?since=600.5   только точки с t > 600.5
 
 | `key` | `name` | Что это |
 |---|---|---|
-| `HAB1-S` | Habitat 1 · Sockets | розетки жилого модуля 1 |
-| `HAB2-S` | Habitat 2 · Sockets | розетки жилого модуля 2 |
-| `WS-S1` | Workshop · Sockets 1 | розетки мастерской, линия 1 |
-| `WS-S2` | Workshop · Sockets 2 | розетки мастерской, линия 2 |
-| `BIO-S1` | Bioreactor · Sockets 1 | розетки модуля биореактора, линия 1 |
-| `BIO-S2` | Bioreactor · Sockets 2 | розетки модуля биореактора, линия 2 |
-| `CTL-S1` | Control · Sockets 1 | розетки модуля управления, линия 1 |
-| `CTL-S2` | Control · Sockets 2 | розетки модуля управления, линия 2 |
-| `HAB1-L` | Habitat 1 · Lighting | освещение жилого модуля 1 |
-| `HAB2-L` | Habitat 2 · Lighting | освещение жилого модуля 2 |
-| `WS-L` | Workshop · Lighting | освещение мастерской |
-| `BIO-L` | Bioreactor · Lighting | освещение модуля биореактора |
-| `CTL-L` | Control · Lighting | освещение модуля управления |
+| `HAB1-S` | HAB 1 · Sockets | розетки жилого модуля HAB 1 |
+| `HAB2-S` | HAB 2 · Sockets | розетки жилого модуля HAB 2 |
+| `FAB-S1` | FABLAB · Sockets 1 | розетки FABLAB (мастерская), линия 1 |
+| `FAB-S2` | FABLAB · Sockets 2 | розетки FABLAB (мастерская), линия 2 |
+| `BIO-S1` | BIOLAB · Sockets 1 | розетки BIOLAB, группа 1 |
+| `BIO-S2` | BIOLAB · Sockets 2 | розетки BIOLAB, группа 2 |
+| `MAIN-S1` | MAIN · Sockets 1 | розетки главного модуля MAIN, линия 1 |
+| `MAIN-S2` | MAIN · Sockets 2 | розетки главного модуля MAIN, линия 2 |
+| `HAB1-L` | HAB 1 · Lighting | освещение жилого модуля HAB 1 |
+| `HAB2-L` | HAB 2 · Lighting | освещение жилого модуля HAB 2 |
+| `FAB-L` | FABLAB · Lighting | освещение FABLAB |
+| `BIO-L` | BIOLAB · Lighting | освещение BIOLAB |
+| `MAIN-L` | MAIN · Lighting | освещение MAIN |
 
 **Какое реле (`id`) питает какого потребителя, определяется на площадке при монтаже**, и организатор
 может поменять привязку в любой момент. Поэтому:
@@ -381,7 +381,7 @@ GET /api/telemetry/history?since=600.5   только точки с t > 600.5
 * в истории (`lines_w`) данные хранятся по `id` реле. Если привязку поменяли в течение дня,
   старые точки остаются за тем же реле.
 
-Чтобы сгруппировать данные по модулям, разбирайте `key`: префикс `HAB1`, `HAB2`, `WS`, `BIO`, `CTL` —
+Чтобы сгруппировать данные по модулям, разбирайте `key`: префикс `MAIN`, `FAB`, `BIO`, `HAB1`, `HAB2` —
 модуль, суффикс `S…` — розетки, `L` — освещение.
 
 ---

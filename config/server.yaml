@@ -40,19 +40,19 @@ solar:
 # Какой линии (реле) соответствует какой потребитель, задаётся на площадке из админки:
 #   name <линия> <ключ>       → сохраняется в line_map (по умолчанию — по порядку списка)
 consumers:
-  - {key: HAB1-S, name: "Habitat 1 · Sockets"}
-  - {key: HAB2-S, name: "Habitat 2 · Sockets"}
-  - {key: WS-S1,  name: "Workshop · Sockets 1"}
-  - {key: WS-S2,  name: "Workshop · Sockets 2"}
-  - {key: BIO-S1, name: "Bioreactor · Sockets 1"}
-  - {key: BIO-S2, name: "Bioreactor · Sockets 2"}
-  - {key: CTL-S1, name: "Control · Sockets 1"}
-  - {key: CTL-S2, name: "Control · Sockets 2"}
-  - {key: HAB1-L, name: "Habitat 1 · Lighting"}
-  - {key: HAB2-L, name: "Habitat 2 · Lighting"}
-  - {key: WS-L,   name: "Workshop · Lighting"}
-  - {key: BIO-L,  name: "Bioreactor · Lighting"}
-  - {key: CTL-L,  name: "Control · Lighting"}
+  - {key: HAB1-S,  name: "HAB 1 · Sockets"}
+  - {key: HAB2-S,  name: "HAB 2 · Sockets"}
+  - {key: FAB-S1,  name: "FABLAB · Sockets 1"}
+  - {key: FAB-S2,  name: "FABLAB · Sockets 2"}
+  - {key: BIO-S1,  name: "BIOLAB · Sockets 1"}
+  - {key: BIO-S2,  name: "BIOLAB · Sockets 2"}
+  - {key: MAIN-S1, name: "MAIN · Sockets 1"}
+  - {key: MAIN-S2, name: "MAIN · Sockets 2"}
+  - {key: HAB1-L,  name: "HAB 1 · Lighting"}
+  - {key: HAB2-L,  name: "HAB 2 · Lighting"}
+  - {key: FAB-L,   name: "FABLAB · Lighting"}
+  - {key: BIO-L,   name: "BIOLAB · Lighting"}
+  - {key: MAIN-L,  name: "MAIN · Lighting"}
 line_map: config/line_map.yaml
 
 # Линии (реле) 1–13. driver: sim — эмулятор, tuya — реальное реле TONGOU (данные из smart_rele/devices.json).

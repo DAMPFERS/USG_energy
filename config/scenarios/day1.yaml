@@ -95,7 +95,7 @@ phases:
     corridor: {min_kw: 3.0, max_kw: 6.0}
     solar_factor: 0.3          # фактическая генерация = 30% от прогноза
     locked_lines:
-      WS-S2: "Workshop machinery is shut down for the duration of the storm"
+      FAB-S2: "FABLAB machinery is shut down for the duration of the storm"
     on_overload: {grace_s: 15, trip: auto, duration_min: 15}
     message:
       level: CRIT
@@ -142,7 +142,7 @@ events:
 
   - at: "16:30"
     level: CRIT
-    message: "Short circuit in the Bioreactor (sockets 2)! The line is de-energized for 20 minutes of repair."
+    message: "Short circuit in the BIOLAB (sockets 2)! The line is de-energized for 20 minutes of repair."
     lock_lines: {lines: [BIO-S2], duration_min: 20, reason: "Short circuit, repair in progress"}
 
   - at: "17:30"

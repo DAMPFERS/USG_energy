@@ -8,3 +8,4 @@ smart_rele/tinytuya.json
 smart_rele/devices.json
 smart_rele/snapshot.json
 smart_rele/tuya-raw.json
+.venv/

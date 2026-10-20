@@ -18,6 +18,47 @@ python -m admin --url http://<ip-сервера>:8000 --token <admin_token>
 Для отладки в `config/server.yaml` стоит `clock.mode: sim` (день идёт ×20).
 На игре поставьте `clock.mode: real`.
 
+## Запуск под Linux
+
+Нужен Python 3.10+ (проверено на 3.10 и 3.12).
+
+```
+sudo apt install python3 python3-venv git
+git clone https://github.com/DAMPFERS/USG_energy.git && cd USG_energy
+git checkout dome-1                    # на машине второго купола — dome-2
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python -m server                       # в отдельном терминале: python -m admin
+```
+
+* В режиме `clock.mode: real` время купола = системное время машины — проверьте часовой пояс
+  (`timedatectl`, при необходимости `sudo timedatectl set-timezone Europe/Moscow`).
+* Сервер слушает порт 8000 — если включён файрвол: `sudo ufw allow 8000/tcp`.
+
+## Ветки куполов
+
+Куполов два, у каждого свой щиток и свой экземпляр сервера:
+
+| Ветка | Что в ней |
+|---|---|
+| `main` | общий код, сценарии, веб-панель, консоль организатора |
+| `dome-1`, `dome-2` | то же + конфигурация щитка своего купола (`config/server.yaml`: линии, реле, ключи) |
+
+Обновление:
+
+```
+# разработчик: изменения кода — в main, затем влить в ветки куполов
+git checkout dome-1 && git merge main && git push
+git checkout dome-2 && git merge main && git push
+
+# машина купола
+git pull && python -m server
+```
+
+Чтобы слияние проходило без конфликтов, конфигурацию щитков меняйте только в ветках куполов,
+а `config/server.yaml` в `main` после разделения не трогайте. Логи (`logs/`) в git не попадают;
+`config/line_map.yaml` создаётся на машине командой `name` в консоли организатора.
+
 ## Структура
 
 ```

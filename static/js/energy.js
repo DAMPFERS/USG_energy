@@ -59,7 +59,7 @@ const state = {
   gaps: [],          // [[t_от, t_до]] — сервер не работал
   gapMin: 3,         // разрыв между точками (мин), с которого линия графика рвётся
   serverT: null,     // t последней точки, полученной с сервера
-  forecast: null,    // {t:[], mean:[], sd:[]}
+  forecast: null,    // прогноз солнца (только положение Солнца, без запылённости): {t:[], mean:[], sd:[]}
   activeLines: new Set(),
   show: { forecast: true, gen: true, cons: true, limit: true },
   range: 'cur',      // '2h' | 'cur' (текущий сол) | 'sol:N'
@@ -240,12 +240,21 @@ function chip(label, color, swClass, checked, onChange) {
 }
 function buildSeriesToggles() {
   const wrap = $('seriesToggles');
-  [['forecast', 'Forecast ± σ', C.forecast, 'dashed'],
+  [['forecast', 'Sun forecast ± 5%', C.forecast, 'dashed'],
    ['gen', 'Generation', C.gen, ''],
    ['cons', 'Consumption', C.cons, ''],
    ['limit', 'Max load', C.limit, 'dashed']].forEach(([k, label, color, sw]) => {
-    wrap.appendChild(chip(label, color, sw, state.show[k], v => { state.show[k] = v; }));
+    const c = chip(label, color, sw, state.show[k], v => { state.show[k] = v; });
+    if (k === 'forecast') c.id = 'chipForecast';
+    wrap.appendChild(c);
   });
+}
+// подпись прогноза: разброс берём из данных сервера (solar.fluctuation_pct)
+function labelForecast() {
+  const f = state.forecast, el = $('chipForecast');
+  if (!f || !el) return;
+  const i = f.mean.indexOf(Math.max(...f.mean));
+  if (i >= 0 && f.mean[i] > 0) el.querySelector('.chip-txt').textContent = 'Sun forecast ± ' + Math.round(f.sd[i] / f.mean[i] * 100) + '%';
 }
 const lineChipEls = [];
 function buildLineChips(lines) {
@@ -508,7 +517,7 @@ function initHover() {
       });
     }
     const fc = state.show.forecast ? forecastAt(tt) : null;
-    if (fc) html += row(C.forecast, 'dashed', 'Forecast', fc.mean.toFixed(2) + ' ± ' + fc.sd.toFixed(2) + ' kW');
+    if (fc) html += row(C.forecast, 'dashed', 'Sun forecast', fc.mean.toFixed(2) + ' ± ' + fc.sd.toFixed(2) + ' kW');
     if (!html) { tip.hidden = true; return; }
     tip.innerHTML = '<div class="tip-time">' + fmtSolHM(tt) + '</div>' + html;
     tip.hidden = false;
@@ -529,7 +538,7 @@ function buildTable() {
   if (!det.open || !state.snap) return;
   const [x0, x1] = rangeWindow();
   const h = state.history.filter(p => p.t >= x0 && p.t <= x1).slice(-240).reverse();
-  let html = '<thead><tr><th>Time</th><th>Generation</th><th>Forecast</th><th>Consumption</th><th>Max</th><th>Min</th><th>Battery kWh</th>';
+  let html = '<thead><tr><th>Time</th><th>Generation</th><th>Sun forecast</th><th>Consumption</th><th>Max</th><th>Min</th><th>Battery kWh</th>';
   state.activeLines.forEach(i => html += '<th>' + esc(state.snap.lines[i].name) + '</th>');
   html += '</tr></thead><tbody>';
   h.forEach((p, k) => {
@@ -602,6 +611,7 @@ async function loadHistory(full) {
 }
 async function loadForecast() {
   state.forecast = await api('/api/forecast');
+  labelForecast();
 }
 async function pollState() {
   try {

@@ -9,3 +9,6 @@ smart_rele/devices.json
 smart_rele/snapshot.json
 smart_rele/tuya-raw.json
 .venv/
+
+# выгрузка запылённости для георазведки (python -m server.export_dust)
+dust_export.csv

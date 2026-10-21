@@ -1,6 +1,6 @@
 # ============================================================================
-#  Сценарий игры. Одна игра = один файл: начало, длительность, прогноз солнца
-#  и сообщения терминала по расписанию.
+#  Сценарий игры. Одна игра = один файл: начало, длительность, прогноз солнца,
+#  запылённость атмосферы и сообщения терминала по расписанию.
 #
 #  Время купола — марсианское. Сол длится 24 ч 40 мин: после 23:59 часы идут
 #  24:00…24:39, затем начинается следующий сол с 00:00. Формат времени — «сол ЧЧ:ММ»,
@@ -13,7 +13,10 @@ name: "ISG 2026 — Mars dome"
 start: "2026-10-27 11:30"     # земное время начала игры (заселение) — по нему идёт отсчёт в режиме real
 start_mars: "1 11:30"         # какому марсианскому времени соответствует start (по умолчанию — Сол 1 + ЧЧ:ММ из start)
 duration_h: 50                # длительность игры, ч
-forecast_csv: ../../data/forecast.csv   # прогноз солнца: sol,time,forecast_kw,sigma_kw (шаг 5 мин)
+forecast_csv: ../../data/forecast.csv   # солнечная составляющая (положение Солнца): sol,time,forecast_kw; шаг 5 мин.
+                                        # Её видят участники (± solar.fluctuation_pct из server.yaml)
+dust_csv: ../../data/dust.csv           # запылённость атмосферы: sol,time,dust_pct (0 — ясно, 100 — буря, генерация 0).
+                                        # Участникам не показывается; выгрузка для георазведки — python -m server.export_dust
 history_step_s: 30            # шаг записи истории (игровые секунды)
 
 # --------------------------------------------------------------------------- сообщения терминала
@@ -59,19 +62,13 @@ messages:
     level: INFO
     text: "Laboratory programme starts. FABLAB and BIOLAB will need more power today."
 
-  - at: "2 11:30"
-    level: WARN
-    text: |
-      Weather service: a dust storm is approaching the dome, expected at 13:00 and lasting until about 16:30.
-      Solar output will drop to about a third. Charge the battery now!
-
   - at: "2 13:00"
     level: CRIT
-    text: "DUST STORM. Solar panel output has dropped sharply. Reduce the load to the minimum."
+    text: "DUST STORM. Solar panels are producing no power. Reduce the load to the minimum."
 
   - at: "2 16:30"
-    level: OK
-    text: "The storm is subsiding. Panels are being cleaned, generation is recovering."
+    level: WARN
+    text: "The storm is subsiding, but the solar panels are covered with dust. Panel cleaning is required to restore generation."
 
   - at: "2 18:00"
     level: WARN

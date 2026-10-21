@@ -21,7 +21,7 @@ from .linemap import LineMap
 from .relays import RelayManager, build_lines
 from .scenario import load_scenario
 from .settings import Settings
-from .solar import Forecast, SimSolarSource
+from .solar import DustSeries, Forecast, SimSolarSource
 from .terminal import Terminal
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,12 +69,13 @@ def main():
     relays = RelayManager(line_cfgs, float(cfg.get("relay_poll_s", 1.0)))
     linemap = LineMap([l.id for l in line_cfgs], cfg.get("consumers"), p(cfg.get("line_map", "config/line_map.yaml")),
                       {l.id: l.name for l in line_cfgs})
-    forecast = Forecast(sc.forecast_csv, sc.mars.sol_min)
     sol = cfg.get("solar", {}) or {}
+    forecast = Forecast(sc.forecast_csv, sc.mars.sol_min, float(sol.get("fluctuation_pct", 5.0)))
+    dust = DustSeries(sc.dust_csv, sc.mars.sol_min)
     if sol.get("source", "sim") != "sim":
         raise SystemExit(f"Неизвестный источник генерации: {sol.get('source')}")
-    solar = SimSolarSource(forecast, lambda: sc.mars.t(clock.now()), float(sol.get("interval_s", 1.0)),
-                           float(sol.get("noise", 1.0)), float(sol.get("correlation", 0.97)))
+    solar = SimSolarSource(forecast, dust, lambda: sc.mars.t(clock.now()), float(sol.get("interval_s", 1.0)),
+                           float(sol.get("correlation", 0.97)))
     terminal = Terminal(os.path.join(logs_dir, f"terminal_{sc.id}.log"),
                         lambda dt: sc.mars.label(sc.mars.t(dt), seconds=True))
     settings = Settings(cfg, cfg_path)

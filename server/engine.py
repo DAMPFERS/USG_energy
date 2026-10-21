@@ -542,10 +542,13 @@ class Engine:
 
     def admin_view(self) -> dict:
         now = self.clock.now()
+        t = self.mars.t(now)
         with self._lock:
             return {
                 "settings": self.settings.view(),
                 "solar_admin": self.solar_admin,
+                # скрытая от участников разбивка генерации: солнце × (1 − пыль) × коэффициент админа
+                "solar": {"sun_kw": round(self.forecast.at(t)[0], 3), "dust_pct": round(self.solar.dust.at(t), 1)},
                 "crisis": {
                     "paused": self.crisis_paused,
                     "alarms": {k: {"active": a.active, "elapsed_s": round(a.elapsed_s, 1),

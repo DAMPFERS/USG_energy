@@ -204,7 +204,9 @@ class AdminConsole(App):
         t = Text()
         t.append("Генерация    ")
         t.append(f"{s['gen']:6.2f} кВт", style="bold #ff8c3a")
-        t.append(f"   солнце ×{a['solar_admin']:.2f}\n", style="grey62" if a["solar_admin"] == 1 else "yellow")
+        sol = a["solar"]
+        t.append(f"   = солнце {sol['sun_kw']:.2f} × (1 − пыль {sol['dust_pct']:.0f}%) ", style="grey62")
+        t.append(f"× коэф. {a['solar_admin']:.2f}\n", style="grey62" if a["solar_admin"] == 1 else "bold yellow")
         t.append("Потребление  ")
         over = cons > lim["max"]
         under = lim["min"] is not None and cons < lim["min"]

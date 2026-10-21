@@ -1,8 +1,8 @@
 """
 Загрузка сценария игры (YAML). Формат описан в config/scenarios/mission.yaml.
 
-Сценарий — это одна большая игра: начало (земное время), длительность, прогноз солнца
-и сообщения терминала по расписанию. Время сообщений — марсианское («сол ЧЧ:ММ»).
+Сценарий — это одна большая игра: начало (земное время), длительность, прогноз солнца,
+запылённость атмосферы и сообщения терминала по расписанию. Время сообщений — марсианское («сол ЧЧ:ММ»).
 """
 import os
 from dataclasses import dataclass, field
@@ -31,6 +31,7 @@ class Scenario:
     start_t: float
     end_t: float
     forecast_csv: str
+    dust_csv: str | None
     history_step_s: float
     messages: list = field(default_factory=list)
 
@@ -57,9 +58,8 @@ def load_scenario(path: str) -> Scenario:
         messages.append(Message(f"msg:{t:g}:{text[:40]}", t, level, text))
     messages.sort(key=lambda x: x.t)
 
-    fc = raw["forecast_csv"]
-    if not os.path.isabs(fc):
-        fc = os.path.normpath(os.path.join(base_dir, fc))
+    def rel(p):
+        return p if not p or os.path.isabs(p) else os.path.normpath(os.path.join(base_dir, p))
 
     return Scenario(
         id=os.path.splitext(os.path.basename(path))[0],
@@ -68,7 +68,8 @@ def load_scenario(path: str) -> Scenario:
         mars=mars,
         start_t=start_t,
         end_t=end_t,
-        forecast_csv=fc,
+        forecast_csv=rel(raw["forecast_csv"]),
+        dust_csv=rel(raw.get("dust_csv")),
         history_step_s=float(raw.get("history_step_s", 30)),
         messages=messages,
     )

@@ -14,7 +14,7 @@
     <p><span id="dayName">ISG: Dome power system</span> · <span id="phaseName" class="phase">—</span></p>
   </div>
   <div class="clock">
-    <div id="clock" class="clock-time">--:--:--</div>
+    <div class="clock-row"><span id="solName" class="sol">SOL —</span><span id="clock" class="clock-time">--:--:--</span></div>
     <div class="live"><i id="liveDot"></i><span id="upd">connecting…</span></div>
   </div>
   <img class="logo" src="assets/logo_2.png" alt="Logo 2">
@@ -23,7 +23,10 @@
 <main class="layout">
   <!-- ===== линии ===== -->
   <section class="panel lines-panel" aria-label="Power lines">
-    <h2>Power lines</h2>
+    <div class="lines-head">
+      <h2>Power lines</h2>
+      <span class="hint" title="In a power deficit, lines are switched off starting from priority 13 down to 1">priority: 13 is shed first</span>
+    </div>
     <div id="lineButtons" class="line-buttons"></div>
   </section>
 
@@ -33,17 +36,17 @@
       <div class="kpi" style="--lc:var(--or)"><span>Generation</span><b id="kGen">—</b></div>
       <div class="kpi" style="--lc:var(--bl2)"><span>Consumption</span><b id="kCons">—</b></div>
       <div class="kpi"><span>Balance</span><b id="kNet">—</b></div>
-      <div class="kpi corridor-kpi" id="kCorrBox"><span>Corridor</span><b id="kCorr">—</b><em id="kCorrState"></em></div>
+      <div class="kpi limit-kpi" id="kMaxBox" title="Consumption must stay below this limit, otherwise blackout">
+        <span>Max load</span><b id="kMax">—</b><em id="kMaxState"></em></div>
+      <div class="kpi limit-kpi" id="kMinBox" title="Generation minus the battery's maximum charge power: below this, surplus exceeds what the battery can take">
+        <span>Min load <small>gen − max charge</small></span><b id="kMin">—</b><em id="kMinState"></em></div>
     </div>
     <div id="alarms" class="alarms" aria-live="assertive"></div>
 
     <article class="panel chart-card" aria-label="Generation, consumption and forecast">
       <div class="card-head">
         <h2>Generation and consumption</h2>
-        <div class="seg" role="group" aria-label="Range">
-          <button type="button" data-range="day" class="is-sel">Whole day</button>
-          <button type="button" data-range="2h">2 hours</button>
-        </div>
+        <div class="seg" id="rangeSeg" role="group" aria-label="Range"></div>
       </div>
       <div class="series-toggles" id="seriesToggles"></div>
       <div class="line-toggles" id="lineToggles" aria-label="Show line on chart"></div>
@@ -60,12 +63,12 @@
 
   <!-- ===== справа: АКБ и терминал ===== -->
   <section class="right">
-    <article class="panel bat-panel" aria-label="Batteries">
+    <article class="panel bat-panel" aria-label="Battery">
       <h2>Energy storage</h2>
-      <div id="batteries" class="batteries"></div>
+      <div id="battery" class="bat"></div>
     </article>
     <article class="terminal" aria-label="Terminal">
-      <div class="term-head"><span>dome-sys :: log</span><span id="termStats" title="overload ▲ · hibernation ▼ · deficit ⚡"></span></div>
+      <div class="term-head"><span>dome-sys :: log</span><span id="termStats" title="blackouts · battery disconnects · load sheddings"></span></div>
       <div id="termBody" class="term-body" role="log" aria-live="polite"></div>
     </article>
   </section>

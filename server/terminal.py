@@ -3,18 +3,21 @@
 веб-страница получает их через API, которое читает этот же файл.
 
 Формат строки:  2026-10-07 09:15:00 | WARN | Текст сообщения (переводы строк как \\n)
+Время в файле — земное; в API к нему добавляется марсианское (поле mars, функция mars_label).
 Уровни: INFO, WARN, CRIT, OK.
 """
 import os
 import threading
 from datetime import datetime
+from typing import Callable
 
 LEVELS = ("INFO", "WARN", "CRIT", "OK")
 
 
 class Terminal:
-    def __init__(self, path: str):
+    def __init__(self, path: str, mars_label: Callable[[datetime], str] | None = None):
         self.path = path
+        self.mars_label = mars_label
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self._lock = threading.Lock()
         self._cache: list[dict] = []
@@ -45,6 +48,12 @@ class Terminal:
                 parts = line.rstrip("\n").split(" | ", 2)
                 if len(parts) != 3:
                     continue
-                out.append({"n": len(out) + 1, "ts": parts[0], "level": parts[1],
-                            "text": parts[2].replace("\\n", "\n")})
+                m = {"n": len(out) + 1, "ts": parts[0], "level": parts[1],
+                     "text": parts[2].replace("\\n", "\n")}
+                if self.mars_label:
+                    try:
+                        m["mars"] = self.mars_label(datetime.fromisoformat(parts[0]))
+                    except ValueError:
+                        m["mars"] = parts[0]
+                out.append(m)
         return out

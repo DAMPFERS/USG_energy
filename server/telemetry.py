@@ -2,13 +2,15 @@
 Телеметрия для ЦУП: данные энергосистемы в физических единицах (Вт, А, А·ч).
 
 GET /api/telemetry                       — текущий срез
+GET /api/telemetry/meta                  — справочник
 GET /api/telemetry/forecast              — прогноз солнечной генерации W(t)
-GET /api/telemetry/history?since=<t>     — история дня (для графиков)
+GET /api/telemetry/history?since=<t>     — история игры (для графиков) + пропуски связи
 WS  /ws/telemetry                        — поток: hello, forecast, telemetry (каждые push_interval_s), message
 
+Время купола — марсианское: t — минуты от Сола 1 00:00, sol + time (сол длится 24:40).
 Мощности — игровые (кВт купола × 1000), т.е. те же, что видят участники.
-Ток и ёмкость АКБ считаются через номинальное напряжение АКБ (voltage_v в сценарии
-или telemetry.battery_voltage_v в server.yaml): I = P / U, А·ч = Вт·ч / U.
+Ток и ёмкость АКБ считаются через номинальное напряжение (telemetry.battery_voltage_v):
+I = P / U, А·ч = Вт·ч / U.
 
 Если в server.yaml задан telemetry.token — его нужно передавать в заголовке
 X-Telemetry-Token или параметром ?token=.
@@ -17,26 +19,19 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
 
 from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .clock import hhmm_to_min, dt_to_min
 from .engine import Engine
 
 log = logging.getLogger("telemetry")
 
-SCHEMA = 1
+SCHEMA = 2
 
 
-def _w(kw) -> float:
-    return round(float(kw) * 1000.0, 1)
-
-
-def _hhmm(minute: float) -> str:
-    m = int(round(minute))
-    return f"{m // 60:02d}:{m % 60:02d}"
+def _w(kw) -> float | None:
+    return None if kw is None else round(float(kw) * 1000.0, 1)
 
 
 class Telemetry:
@@ -53,23 +48,31 @@ class Telemetry:
         if self.token and token != self.token:
             raise HTTPException(403, "Invalid telemetry token")
 
-    def _volt(self, b) -> float:
-        return float(b.voltage_v or self.voltage)
+    def _ah(self, kwh) -> float:
+        return round(kwh * 1000 / self.voltage, 2)
+
+    def _a(self, kw) -> float:
+        return round(kw * 1000 / self.voltage, 2)
+
+    def _mars(self, t: float) -> dict:
+        m = self.engine.mars
+        return {"t": round(t, 3), "sol": m.sol(t), "time": m.hm(t, seconds=True)}
 
     # ------------------------------------------------------------------ полезная нагрузка
     def meta(self) -> dict:
         e = self.engine
+        b = e.battery
         return {
             "schema": SCHEMA,
-            "day": e.sc.day, "scenario": e.sc.id,
-            "day_start": _hhmm(e.sc.start), "day_end": _hhmm(e.sc.end),
+            "name": e.sc.name, "scenario": e.sc.id,
+            "sol_min": e.mars.sol_min,
+            "start": self._mars(e.sc.start_t), "end": self._mars(e.sc.end_t),
             "clock": {"mode": e.clock.mode, "speed": e.clock.speed},
             "push_interval_s": self.push_interval,
-            "lines": [{"id": lid, "name": e.name(lid), "key": e.map.key(lid)} for lid in e.lines],
+            "lines": [{"id": lid, "name": e.name(lid), "key": e.map.key(lid), "priority": e.priority[lid]}
+                      for lid in e.lines],
             "sources": [{"id": "solar", "name": "Solar panels", "type": "solar"}],
-            "batteries": [{"id": b.id, "name": b.name, "voltage_v": self._volt(b),
-                           "nominal_ah": round(b.nominal_kwh * 1000 / self._volt(b), 2)}
-                          for b in e.batteries.values()],
+            "battery": {"name": b.name, "voltage_v": self.voltage, "capacity_ah": self._ah(b.capacity_kwh)},
         }
 
     def snapshot(self) -> dict | None:
@@ -78,8 +81,7 @@ class Telemetry:
         if not s:
             return None
         readings = e.relays.readings()
-        now = e.clock.now()
-        fc_kw, fc_sd = e.forecast.at(dt_to_min(now))
+        fc_kw, fc_sd = e.forecast.at(s["t"])
         self._seq += 1
 
         lines = []
@@ -87,55 +89,48 @@ class Telemetry:
             r = readings.get(l["id"])
             lines.append({
                 "id": l["id"], "name": l["name"], "key": l.get("key"), "on": l["on"], "online": l["online"],
-                "status": l["status"], "power_w": _w(l["kw"]),
-                "reason": l["reason"] or None, "until": l["until"],
+                "status": l["status"], "priority": l["priority"], "power_w": _w(l["kw"]),
+                "reason": l["reason"] or None, "until": l["until"], "until_t": l["until_t"],
                 "measured": {"power_w": round(r.raw_w, 1), "voltage_v": round(r.voltage, 1),
                              "current_a": round(r.current, 3)} if r and r.online else None,
             })
 
-        bats = []
-        for b in e.batteries.values():
-            u = self._volt(b)
-            p_w = b.power_kw * 1000.0
-            bats.append({
-                "id": b.id, "name": b.name, "active": b.id == s["active_battery"], "status": b.status,
-                "voltage_v": u,
-                "capacity_ah": round(b.capacity_kwh * 1000 / u, 2),
-                "nominal_ah": round(b.nominal_kwh * 1000 / u, 2),
-                "available_ah": round(b.charge_kwh * 1000 / u, 2),
-                "soc_pct": round(100 * b.charge_kwh / b.capacity_kwh, 1) if b.capacity_kwh else 0.0,
-                "current_a": round(p_w / u, 2),
-                "power_w": round(p_w, 1),
-                "mode": "charge" if p_w > 0.5 else "discharge" if p_w < -0.5 else "idle",
-                "max_charge_a": round(b.max_charge_kw * 1000 / u, 2),
-                "max_discharge_a": round(b.max_discharge_kw * 1000 / u, 2),
-                "peak_discharge_a": round(b.peak_discharge_kw * 1000 / u, 2),
-                "fault_until": b.fault_until.strftime("%H:%M:%S") if b.fault_until else None,
-            })
-
+        b = s["battery"]
+        p_w = b["power_kw"] * 1000.0
         return {
             "type": "telemetry", "schema": SCHEMA, "seq": self._seq,
             "ts": round(time.time(), 3),
-            "game_time": now.isoformat(timespec="seconds"),
-            "game_status": s["status"], "phase": s["phase"],
+            "earth_time": e.clock.now().isoformat(timespec="seconds"),
+            "mars": {"t": s["t"], "sol": s["sol"], "time": s["time"]},
+            "game_status": s["status"],
             "generation": {
                 "total_w": _w(s["gen"]),
                 "sources": [{"id": "solar", "name": "Solar panels", "type": "solar",
                              "power_w": _w(s["gen"]), "forecast_w": _w(fc_kw), "sigma_w": _w(fc_sd)}],
             },
-            "consumption": {"total_w": _w(s["cons"]),
-                            "corridor": {"min_w": _w(s["corridor"]["min"]), "max_w": _w(s["corridor"]["max"])}},
+            "consumption": {"total_w": _w(s["cons"])},
+            "limits": {"max_w": _w(s["limits"]["max"]), "min_w": _w(s["limits"]["min"]),
+                       "max_charge_w": _w(s["limits"]["max_charge"]),
+                       "max_discharge_w": _w(s["limits"]["max_discharge"])},
             "balance_w": _w(s["net"]),
             "deficit_w": _w(s["deficit"]),
+            "alarms": [{"kind": a["kind"], "title": a["title"], "left_s": a["left_s"]} for a in s["alarms"]],
             "lines": lines,
-            "active_battery": s["active_battery"],
-            "batteries": bats,
+            "battery": {
+                "name": b["name"], "status": "connected" if b["connected"] else "disconnected",
+                "off_until": b["off_until"], "voltage_v": self.voltage,
+                "capacity_ah": self._ah(b["capacity_kwh"]), "available_ah": self._ah(b["charge_kwh"]),
+                "soc_pct": round(100 * b["soc"], 1),
+                "current_a": round(p_w / self.voltage, 2), "power_w": round(p_w, 1),
+                "mode": "charge" if p_w > 0.5 else "discharge" if p_w < -0.5 else "idle",
+                "max_charge_a": self._a(b["max_charge_kw"]), "max_discharge_a": self._a(b["max_discharge_kw"]),
+            },
         }
 
     def forecast(self, t_from: str | None = None, t_to: str | None = None, step_min: float | None = None) -> dict:
         e = self.engine
-        a = hhmm_to_min(t_from) if t_from else e.sc.start
-        b = hhmm_to_min(t_to) if t_to else e.sc.end
+        a = e.mars.parse(t_from) if t_from else e.sc.start_t
+        b = e.mars.parse(t_to) if t_to else e.sc.end_t
         step = float(step_min or self.forecast_step)
         if step <= 0 or b < a:
             raise ValueError("Invalid interval or step")
@@ -144,30 +139,27 @@ class Telemetry:
         points, m = [], float(a)
         while m <= b + 1e-9:
             kw, sd = e.forecast.at(m)
-            points.append({"t": round(m, 3), "time": _hhmm(m), "forecast_w": _w(kw), "sigma_w": _w(sd),
+            points.append({**self._mars(m), "time": e.mars.hm(m), "forecast_w": _w(kw), "sigma_w": _w(sd),
                            "low_w": _w(max(0.0, kw - sd)), "high_w": _w(kw + sd)})
             m += step
-        return {"type": "forecast", "schema": SCHEMA, "source": "solar",
-                "date": e.clock.now().date().isoformat(), "step_min": step,
-                "from": _hhmm(a), "to": _hhmm(b), "points": points}
+        return {"type": "forecast", "schema": SCHEMA, "source": "solar", "step_min": step,
+                "from": e.mars.label(a), "to": e.mars.label(b), "points": points}
 
     def history(self, since: float | None = None) -> dict:
         e = self.engine
         lids = sorted(e.lines)
         out = []
-        for h in e.history_view():
-            if since is not None and h["t"] <= since:
-                continue
+        for h in e.history_view(since):
             out.append({
-                "t": h["t"], "time": _hhmm(h["t"]),
+                **self._mars(h["t"]), "time": e.mars.hm(h["t"]),
                 "generation_w": _w(h["gen"]), "consumption_w": _w(h["cons"]),
-                "corridor": {"min_w": _w(h["min"]), "max_w": _w(h["max"])},
-                "active_battery": h["active"],
+                "limits": {"max_w": _w(h["max"]), "min_w": _w(h["min"])},
                 "lines_w": {str(lid): _w(kw) for lid, kw in zip(lids, h["per"])},
-                "batteries_ah": {bid: round(kwh * 1000 / self._volt(e.batteries[bid]), 2)
-                                 for bid, kwh in h["soc"].items() if bid in e.batteries},
+                "battery_ah": self._ah(h["soc"]), "battery_a": round(h["bat"] * 1000 / self.voltage, 2),
+                "battery_connected": not h["boff"],
             })
-        return {"type": "history", "schema": SCHEMA, "step_s": e.sc.history_step_s, "samples": out}
+        gaps = [{"from": self._mars(a), "to": self._mars(b)} for a, b in e.gaps()]
+        return {"type": "history", "schema": SCHEMA, "step_s": e.sc.history_step_s, "samples": out, "gaps": gaps}
 
 
 def install(app: FastAPI, engine: Engine, cfg: dict | None):
@@ -249,7 +241,7 @@ def install(app: FastAPI, engine: Engine, cfg: dict | None):
                     await ws.send_json(snap)
                 for m in engine.term.messages(last_n):
                     last_n = m["n"]
-                    await ws.send_json({"type": "message", "n": m["n"], "ts": m["ts"],
+                    await ws.send_json({"type": "message", "n": m["n"], "ts": m["ts"], "mars": m.get("mars"),
                                         "level": m["level"], "text": m["text"]})
                 await asyncio.sleep(tm.push_interval)
 

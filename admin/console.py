@@ -14,12 +14,11 @@ from .client import AdminClient, ApiError
 from .commands import HELP, CommandError, Quit, execute
 
 LINE_STYLE = {"on": ("ВКЛ", "bold green"), "off": ("выкл", "grey62"), "locked": ("БЛОК", "bold yellow"),
-              "tripped": ("АВАРИЯ", "bold red"), "offline": ("НЕТ СВЯЗИ", "bold magenta")}
-BAT_STATUS = {"ok": "норма", "degraded": "деградация", "fault": "защита", "failed": "отказ"}
-PHASE_STATE = {"paused": "ПАУЗА", "cancelled": "ОТМЕНЕНА"}
-BAT_STYLE = {"ok": "green", "degraded": "yellow", "fault": "bold red", "failed": "bold red"}
+              "tripped": ("ДЕФИЦИТ", "bold red"), "offline": ("НЕТ СВЯЗИ", "bold magenta")}
+ALARM_TITLES = {"overload": "перегруз → блэкаут", "surplus": "избыток → отключение АКБ",
+                "deficit": "дефицит → отключение линий"}
 MSG_STYLE = {"INFO": "cyan", "WARN": "yellow", "CRIT": "bold red", "OK": "green"}
-STATUS_TXT = {"before": "ДО НАЧАЛА", "running": "ИДЁТ", "finished": "ЗАВЕРШЁН"}
+STATUS_TXT = {"before": "ДО НАЧАЛА", "running": "ИДЁТ", "finished": "ЗАВЕРШЕНА"}
 
 
 class HelpScreen(ModalScreen):
@@ -79,7 +78,7 @@ class AdminConsole(App):
     #right { width: 1fr; }
     #power { height: auto; border: round $primary; padding: 0 1; }
     #crisis { height: auto; border: round $warning; padding: 0 1; }
-    #bats { height: 1fr; border: round $primary; }
+    #bat { height: 1fr; border: round $primary; padding: 0 1; }
     #bottom { height: 14; }
     #term { width: 1fr; border: round $secondary; }
     #out { width: 1fr; border: round $secondary; }
@@ -103,20 +102,19 @@ class AdminConsole(App):
             with Vertical(id="right"):
                 yield Static(id="power")
                 yield Static(id="crisis")
-                yield DataTable(id="bats", cursor_type="none")
+                yield Static(id="bat")
         with Horizontal(id="bottom"):
             yield RichLog(id="term", wrap=True, markup=False, max_lines=500, min_width=20)
             yield RichLog(id="out", wrap=True, markup=True, max_lines=500, min_width=20)
         yield CommandInput(id="cmd", placeholder="команда (справка — F1) …")
 
     def on_mount(self):
-        self.query_one("#lines", DataTable).add_columns("#", "Ключ", "Потребитель", "Состояние", "кВт", "Блокировка / причина")
-        self.query_one("#bats", DataTable).add_columns("ID", "Название", "Статус", "кВт·ч", "Заряд", "кВт",
-                                                       "зар/разр/пик", "КПД")
+        self.query_one("#lines", DataTable).add_columns("#", "Прио", "Ключ", "Потребитель", "Состояние", "кВт",
+                                                        "Блокировка / причина")
         self.query_one("#lines").border_title = "Линии"
         self.query_one("#power").border_title = "Мощность"
         self.query_one("#crisis").border_title = "Кризис"
-        self.query_one("#bats").border_title = "Аккумуляторы"
+        self.query_one("#bat").border_title = "Аккумулятор"
         self.query_one("#term").border_title = "Терминал участников"
         self.query_one("#out").border_title = "Консоль"
         self.out(f"Сервер: {self.api.url}. Справка по командам — [b]F1[/b].")
@@ -160,7 +158,7 @@ class AdminConsole(App):
         self.render_lines(s)
         self.render_power(s, a)
         self.render_crisis(s, a)
-        self.render_bats(s)
+        self.render_bat(s)
         msgs = d["messages"][-60:] if self.first else d["messages"]
         term = self.query_one("#term", RichLog)
         for m in msgs:
@@ -175,19 +173,14 @@ class AdminConsole(App):
 
     def render_top(self, s, a):
         t = Text(" ")
-        t.append(s["now"], style="bold")
+        t.append(f"Сол {s['sol']} {s['time']}", style="bold #ff8c3a")
+        t.append(f"  (Земля {a['clock']['earth']})", style="grey62")
         if s.get("speed", 1) != 1:
             t.append(f" ×{s['speed']:g}", style="yellow")
-        t.append(f"   {s['day']}   ")
+        t.append(f"   {s['name']}   ")
         st = s["status"]
         t.append(STATUS_TXT.get(st, st), style="bold green" if st == "running" else "bold yellow")
-        ph = a["phase"]
-        if ph["name"]:
-            t.append(f"   Фаза: {ph['name']} (до {ph['to']})")
-            if ph["state"] != "active":
-                t.append(f" [{PHASE_STATE.get(ph['state'], ph['state'])}]", style="bold black on yellow")
-        elif st == "running":
-            t.append("   Фаза: — (по умолчанию)")
+        t.append(f"   {a['game']['start']} – {a['game']['end']}", style="grey62")
         if a["crisis"]["paused"]:
             t.append("   НАРУШЕНИЯ НА ПАУЗЕ", style="bold black on yellow")
         self.query_one("#top", Static).update(t)
@@ -200,35 +193,35 @@ class AdminConsole(App):
             if l["status"] in ("locked", "tripped") and l["on"]:
                 label += " (вкл!)"
             lock = l["reason"] + (f" · до {l['until']}" if l["until"] else "") if l["reason"] else ""
-            tbl.add_row(str(l["id"]), l.get("key") or "-", l["name"], Text(label, style=style),
+            tbl.add_row(str(l["id"]), Text(f"#{l['priority']}", justify="right"), l.get("key") or "-", l["name"],
+                        Text(label, style=style),
                         Text(f"{l['kw']:.2f}" if l["on"] else "—", justify="right"),
                         Text(lock, style="yellow" if l["status"] == "locked" else "red"))
 
     def render_power(self, s, a):
-        c, ov = s["corridor"], a["corridor_override"]
+        lim = s["limits"]
         cons = s["cons"]
-        bad = cons > c["max"] or cons < c["min"]
         t = Text()
         t.append("Генерация    ")
         t.append(f"{s['gen']:6.2f} кВт", style="bold #ff8c3a")
-        t.append(f"   солнце ×{a['solar_factor']:.2f} = фаза {a['solar_phase']:.2f} × админ {a['solar_admin']:.2f}\n",
-                 style="grey62" if a["solar_admin"] == 1 else "yellow")
+        t.append(f"   солнце ×{a['solar_admin']:.2f}\n", style="grey62" if a["solar_admin"] == 1 else "yellow")
         t.append("Потребление  ")
-        t.append(f"{cons:6.2f} кВт", style="bold red" if bad else "bold #5fa8ff")
+        over = cons > lim["max"]
+        under = lim["min"] is not None and cons < lim["min"]
+        t.append(f"{cons:6.2f} кВт", style="bold red" if over or under else "bold #5fa8ff")
         t.append("\nБаланс       ")
         t.append(f"{s['net']:+6.2f} кВт", style="green" if s["net"] >= 0 else "red")
         if s["deficit"] > 0.005:
             t.append(f"   ДЕФИЦИТ {s['deficit']:.2f} кВт", style="bold red")
-        t.append("\nКоридор      ")
-        t.append(f"{c['min']:.2f}", style="bold yellow" if ov["min"] else "bold")
-        t.append(" – ")
-        t.append(f"{c['max']:.2f}", style="bold yellow" if ov["max"] else "bold")
-        t.append(" кВт")
-        for b in ("min", "max"):
-            o = ov[b]
-            if o:
-                t.append(f"\n  переопределён {b} {o['value']:.2f} {'до ' + o['until'] if o['until'] else 'до reset'}"
-                         f" (по сценарию {a['corridor_base'][b]:.2f})", style="yellow")
+        t.append("\nВерхняя      ")
+        t.append(f"{lim['max']:6.2f} кВт", style="bold red" if over else "bold")
+        t.append("\nНижняя       ")
+        if lim["min"] is None:
+            t.append("   —     ", style="grey62")
+            t.append("  (АКБ отключён или полон)", style="grey62")
+        else:
+            t.append(f"{lim['min']:6.2f} кВт", style="bold red" if under else "bold")
+            t.append(f"  = генерация − заряд {lim['max_charge']:g}", style="grey62")
         self.query_one("#power", Static).update(t)
 
     def render_crisis(self, s, a):
@@ -237,32 +230,32 @@ class AdminConsole(App):
         t.append("Нарушения: ")
         t.append("НА ПАУЗЕ" if cr["paused"] else "отслеживаются",
                  style="bold black on yellow" if cr["paused"] else "green")
-        titles = {"overload": "перегруз", "underload": "гибернация", "deficit": "дефицит"}
-        for k, title in titles.items():
-            tm = cr["timers"][k]
-            if tm["elapsed_s"] > 0:
-                t.append(f"\n  ⚠ {title}: {tm['elapsed_s']:.0f}/{tm['grace_s']:.0f} с (игровых)", style="bold red")
-            if k in cr["penalties"]:
-                t.append(f"\n  ✖ {title}: последствие действует до {cr['penalties'][k]}", style="red")
+        for k, title in ALARM_TITLES.items():
+            al = cr["alarms"][k]
+            if al["active"]:
+                t.append(f"\n  ⚠ {title}: {al['elapsed_s']:.0f}/{al['grace_s']:.0f} с (игровых)", style="bold red")
         st = s["stats"]
-        t.append(f"\n  всего: перегруз {st['overload']} · гибернация {st['underload']} · дефицит {st['deficit']}",
+        t.append(f"\n  всего: перегрузов {st['overload']}, блэкаутов {st['blackouts']} · избытков {st['surplus']}, "
+                 f"отключений АКБ {st['battery_off']} · отключений по дефициту {st['sheds']} ({st['lines_shed']} линий)",
                  style="grey62")
         self.query_one("#crisis", Static).update(t)
 
-    def render_bats(self, s):
-        tbl = self.query_one("#bats", DataTable)
-        tbl.clear()
-        for b in s["batteries"]:
-            active = b["id"] == s["active_battery"]
-            st = BAT_STATUS.get(b["status"], b["status"]) + (f" →{b['fault_until'][:5]}" if b.get("fault_until") else "")
-            p = b["power_kw"]
-            tbl.add_row(Text(("▶" if active else " ") + b["id"], style="bold green" if active else ""), b["name"][:14],
-                        Text(st, style=BAT_STYLE.get(b["status"], "")),
-                        f"{b['charge_kwh']:.2f}/{b['capacity_kwh']:.1f}",
-                        Text(f"{b['soc'] * 100:.0f}%", style="red" if b["soc"] < 0.2 else ""),
-                        Text(f"{p:+.2f}", style="green" if p > 0.01 else "red" if p < -0.01 else "grey62"),
-                        f"{b['max_charge_kw']:g}/{b['max_discharge_kw']:g}/{b['peak_discharge_kw']:g}",
-                        f"{b['efficiency']:g}")
+    def render_bat(self, s):
+        b = s["battery"]
+        t = Text()
+        t.append(b["name"], style="bold")
+        t.append("   ")
+        if b["connected"]:
+            t.append("ПОДКЛЮЧЁН" + (" · ПОЛНЫЙ" if b["full"] else ""), style="bold green")
+        else:
+            t.append(f"ОТКЛЮЧЁН до {b['off_until']}", style="bold red")
+        t.append(f"\nЗаряд        {b['charge_kwh']:6.2f} / {b['capacity_kwh']:g} кВт·ч  ")
+        t.append(f"{b['soc'] * 100:.0f}%", style="red" if b["soc"] < 0.2 else "bold")
+        p = b["power_kw"]
+        t.append("\nМощность     ")
+        t.append(f"{p:+6.2f} кВт", style="green" if p > 0.01 else "red" if p < -0.01 else "grey62")
+        t.append(f"   (заряд ≤ {b['max_charge_kw']:g}, разряд ≤ {b['max_discharge_kw']:g})", style="grey62")
+        self.query_one("#bat", Static).update(t)
 
     # ------------------------------------------------------------------ команды
     def on_input_submitted(self, ev: Input.Submitted):

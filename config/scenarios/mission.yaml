@@ -1,0 +1,94 @@
+# ============================================================================
+#  Сценарий игры. Одна игра = один файл: начало, длительность, прогноз солнца
+#  и сообщения терминала по расписанию.
+#
+#  Время купола — марсианское. Сол длится 24 ч 40 мин: после 23:59 часы идут
+#  24:00…24:39, затем начинается следующий сол с 00:00. Формат времени — «сол ЧЧ:ММ»,
+#  например "2 14:05" (Сол 2, 14:05) или "1 24:20".
+#
+#  Параметры аккумулятора и правила (границы, задержки) — в config/server.yaml.
+# ============================================================================
+
+name: "ISG 2026 — Mars dome"
+start: "2026-10-27 11:30"     # земное время начала игры (заселение) — по нему идёт отсчёт в режиме real
+start_mars: "1 11:30"         # какому марсианскому времени соответствует start (по умолчанию — Сол 1 + ЧЧ:ММ из start)
+duration_h: 50                # длительность игры, ч
+forecast_csv: ../../data/forecast.csv   # прогноз солнца: sol,time,forecast_kw,sigma_kw (шаг 5 мин)
+history_step_s: 30            # шаг записи истории (игровые секунды)
+
+# --------------------------------------------------------------------------- сообщения терминала
+# at — время купола «сол ЧЧ:ММ»; level — INFO | WARN | CRIT | OK; text — на английском (видят участники).
+# Если сервер в этот момент не работал, сообщение придёт при запуске с исходным временем.
+messages:
+  - at: "1 11:30"
+    level: INFO
+    text: |
+      Welcome to the dome, power engineers. Settlement has begun.
+      Keep consumption below the upper limit, do not let surplus exceed the battery charge limit,
+      and set line priorities: in a power deficit, lines are shed from priority 13 down to 1.
+
+  - at: "1 12:00"
+    level: INFO
+    text: "Solar output is at its daily peak. A good time to charge the battery."
+
+  - at: "1 16:30"
+    level: INFO
+    text: "Sunset at 18:40. Plan the evening load: at night the dome runs on the battery only."
+
+  - at: "1 18:00"
+    level: WARN
+    text: "Generation is falling. Switch off non-essential consumers and save charge for the night."
+
+  - at: "1 22:00"
+    level: INFO
+    text: "Night mode. The crew is resting: keep only life support and lighting on."
+
+  - at: "1 24:00"
+    level: INFO
+    text: "Timeslip: 40 Martian minutes until the next sol. Clocks show 24:00–24:39."
+
+  - at: "2 00:00"
+    level: OK
+    text: "Sol 2 has begun."
+
+  - at: "2 06:10"
+    level: OK
+    text: "Sunrise. Generation is recovering."
+
+  - at: "2 09:00"
+    level: INFO
+    text: "Laboratory programme starts. FABLAB and BIOLAB will need more power today."
+
+  - at: "2 11:30"
+    level: WARN
+    text: |
+      Weather service: a dust storm is approaching the dome, expected at 13:00 and lasting until about 16:30.
+      Solar output will drop to about a third. Charge the battery now!
+
+  - at: "2 13:00"
+    level: CRIT
+    text: "DUST STORM. Solar panel output has dropped sharply. Reduce the load to the minimum."
+
+  - at: "2 16:30"
+    level: OK
+    text: "The storm is subsiding. Panels are being cleaned, generation is recovering."
+
+  - at: "2 18:00"
+    level: WARN
+    text: "Evening. Generation is falling — prepare the dome for the night."
+
+  - at: "2 24:00"
+    level: INFO
+    text: "Timeslip: 40 Martian minutes until Sol 3."
+
+  - at: "3 06:10"
+    level: OK
+    text: "Sunrise of Sol 3. The final day of the mission."
+
+  - at: "3 12:00"
+    level: INFO
+    text: "Ten minutes until the end of the mission. Prepare the shift report."
+
+  - at: "3 12:10"
+    level: OK
+    text: "Mission complete. Thank you for your service, power engineers!"

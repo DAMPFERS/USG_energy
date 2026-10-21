@@ -1,14 +1,20 @@
 """
 Игровой движок купола. Работает в отдельном потоке, раз в tick_s секунд:
   1. читает показания реле и генерацию;
-  2. применяет сценарий: фазы (коридор, блокировки линий, коэффициент солнца), события;
-  3. считает баланс через активный АКБ;
-  4. отслеживает выход из коридора / дефицит и применяет последствия (отключение линий);
-  5. пишет историю (CSV) и снимок состояния (JSON) — после перезапуска игра продолжается.
+  2. отправляет сообщения сценария в терминал;
+  3. считает баланс через аккумулятор;
+  4. отслеживает три игровые ситуации и применяет последствия:
+     * перегруз — потребление выше max_kw: предупреждение, через overload_grace_min — блэкаут
+       (все линии выключаются, но не блокируются);
+     * избыток — генерация − потребление больше max_charge_kw (АКБ не полный): предупреждение,
+       через surplus_grace_min АКБ отключается на battery_off_min;
+     * дефицит — потребление больше генерации + доступного разряда: через deficit_grace_s линии
+       отключаются по приоритету (13 → 1), пока дефицит не исчезнет, и блокируются на deficit_lock_min;
+  5. пишет историю (CSV) и снимок состояния (JSON) — после перезапуска игра продолжается
+     с текущего реального момента, пропущенный промежуток на графике виден как потеря связи.
 
-Поверх сценария действуют переопределения организатора (админка, admin_* методы):
-блокировки линий, границы коридора, коэффициент солнца, пауза/отмена нарушений и фаз.
-Действия админа не пишутся в терминал участников — для этого есть команда msg.
+Время купола t — минуты от Сола 1 00:00 (см. clock.MarsTime). Все длительности — время купола.
+Действия организатора (admin_*) в терминал участников не пишутся — для этого есть команда msg.
 """
 import csv
 import json
@@ -17,52 +23,40 @@ import os
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 
 from .battery import Battery
-from .clock import GameClock, dt_to_min
+from .clock import GameClock
 from .linemap import LineMap
 from .relays import RelayManager
 from .scenario import Scenario
+from .settings import Settings
 from .solar import Forecast
 from .terminal import Terminal
 
 log = logging.getLogger("engine")
 
-KIND_TITLES = {"overload": "Overload", "underload": "Hibernation", "deficit": "Power deficit"}
-KIND_WARN = {
-    "overload": "WARNING: consumption {cons:.2f} kW is above the {max:.2f} kW limit. "
-                "Protection trips in {grace:.0f} s.",
-    "underload": "WARNING: consumption {cons:.2f} kW is below the {min:.2f} kW threshold. "
-                 "Hibernation in {grace:.0f} s.",
-    "deficit": "WARNING: generation and battery are short by {deficit:.2f} kW. "
-               "Emergency shutdown in {grace:.0f} s.",
-}
+KINDS = ("overload", "surplus", "deficit")
+TITLES = {"overload": "Overload", "surplus": "Battery overcharge", "deficit": "Power deficit"}
 ADMIN_LOCK_REASON = "Locked by Mission Control"
-
-# поля АКБ, которые можно менять из админки
-BATTERY_FIELDS = {
-    "name": str, "description": str, "status": str,
-    "capacity_kwh": float, "nominal_kwh": float, "charge_kwh": float,
-    "max_charge_kw": float, "max_discharge_kw": float, "peak_discharge_kw": float,
-    "efficiency": float, "self_discharge_pct_h": float,
-    "overload_tolerance_s": float, "fault_recovery_min": float,
-}
-BATTERY_STATUSES = ("ok", "degraded", "fault", "failed")
+SHED_REASON = "Load shedding: power deficit"
 
 
 @dataclass
 class LineState:
     id: int
-    lock_until: datetime | None = None     # блокировка событием сценария
-    lock_reason: str = ""
-    trip_until: datetime | None = None     # аварийное отключение (последствие)
-    trip_reason: str = ""
+    trip_until: datetime | None = None     # отключена при дефиците
     admin_lock: bool = False               # блокировка организатором
     admin_until: datetime | None = None    # None — бессрочно
     admin_reason: str = ""
-    unlock_phase: int | None = None        # админ снял блокировку фазы с этим индексом
     last_enforce: float = 0.0
+
+
+@dataclass
+class Alarm:
+    active: bool = False
+    elapsed_s: float = 0.0     # сколько длится нарушение (игровые секунды)
+    ok_s: float = 0.0          # сколько нарушения уже нет (для снятия предупреждения)
 
 
 def _iso(dt):
@@ -73,47 +67,42 @@ def _from_iso(s):
     return datetime.fromisoformat(s) if s else None
 
 
-def _hm(dt):
-    return dt.strftime("%H:%M") if dt else None
-
-
 class Engine:
     def __init__(self, scenario: Scenario, clock: GameClock, relays: RelayManager, solar,
-                 forecast: Forecast, terminal: Terminal, linemap: LineMap, logs_dir: str, tick_s: float = 1.0):
+                 forecast: Forecast, terminal: Terminal, linemap: LineMap, settings: Settings,
+                 logs_dir: str, tick_s: float = 1.0):
         self.sc = scenario
+        self.mars = scenario.mars
         self.clock = clock
         self.relays = relays
         self.solar = solar
         self.forecast = forecast
         self.term = terminal
         self.map = linemap
+        self.settings = settings
         self.tick_s = tick_s
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = None
 
-        self.batteries: dict[str, Battery] = {b["id"]: Battery(**b) for b in scenario.batteries}
-        self.active: str | None = scenario.active_battery
+        self.battery = Battery(settings)
         self.lines = {lid: LineState(lid) for lid in relays.lines}
+        self.priority = {lid: i + 1 for i, lid in enumerate(sorted(self.lines))}   # 1 — отключается последней
+        self.alarms = {k: Alarm() for k in KINDS}
         self.fired: set[str] = set()
-        self.stats = {"overload": 0, "underload": 0, "deficit": 0, "out_of_corridor_s": 0.0,
-                      "deficit_s": 0.0, "curtailed_kwh": 0.0, "deficit_kwh": 0.0}
-        self.timers = {k: 0.0 for k in KIND_TITLES}
-        self.warned = {k: False for k in KIND_TITLES}
-        self.penalty_until: dict[str, datetime | None] = {k: None for k in KIND_TITLES}
+        self.stats = {"overload": 0, "blackouts": 0, "surplus": 0, "battery_off": 0, "sheds": 0,
+                      "lines_shed": 0, "deficit_kwh": 0.0, "curtailed_kwh": 0.0}
         # переопределения организатора
         self.solar_admin = 1.0
-        self.corr_override: dict[str, dict | None] = {"min": None, "max": None}  # {value, until}
         self.crisis_paused = False
-        self.phase_off: dict[int, str] = {}   # индекс фазы → paused | cancelled
 
         self.history: list[dict] = []
         self._last_now: datetime | None = None
         self._last_sample: datetime | None = None
         self._last_save = 0.0
+        self._restart_checked = False
         self._snap: dict = {}
         self._gen = self._cons = self._deficit = 0.0
-        self._solar_factor = 1.0
 
         os.makedirs(logs_dir, exist_ok=True)
         self.state_path = os.path.join(logs_dir, f"state_{scenario.id}.json")
@@ -130,6 +119,19 @@ class Engine:
 
     def name(self, lid: int) -> str:
         return self.map.name(lid)
+
+    def now_t(self) -> float:
+        return self.mars.t(self.clock.now())
+
+    @property
+    def rules(self) -> dict:
+        return self.settings.rules
+
+    def _label(self, dt: datetime | None) -> str | None:
+        return self.mars.label(self.mars.t(dt)) if dt else None
+
+    def _hm(self, dt: datetime | None) -> str | None:
+        return self.mars.hm(self.mars.t(dt)) if dt else None
 
     # ------------------------------------------------------------------ поток
     def start(self):
@@ -152,255 +154,210 @@ class Engine:
             self._stop.wait(self.tick_s)
 
     # ------------------------------------------------------------------ такт
-    def _game_status(self, now: datetime) -> str:
-        if self.sc.date:
-            d = date.fromisoformat(self.sc.date)
-            if now.date() < d:
-                return "before"
-            if now.date() > d:
-                return "finished"
-        m = dt_to_min(now)
-        if m < self.sc.start:
+    def _status(self, t: float) -> str:
+        if t < self.sc.start_t:
             return "before"
-        if m >= self.sc.end:
+        if t >= self.sc.end_t:
             return "finished"
         return "running"
 
-    def _scenario_phase(self, now, status=None):
-        """Фаза по расписанию сценария (без учёта паузы/отмены)."""
-        if (status or self._game_status(now)) != "running":
-            return None
-        return self.sc.phase_at(dt_to_min(now))
-
-    def _phase(self, now, status=None):
-        """Действующая фаза: приостановленная или отменённая админом не действует."""
-        p = self._scenario_phase(now, status)
-        return None if p is None or p.idx in self.phase_off else p
-
-    def _corridor(self, phase) -> dict:
-        base = phase.corridor if phase else self.sc.defaults["corridor"]
-        c = {"min_kw": float(base["min_kw"]), "max_kw": float(base["max_kw"])}
-        for b in ("min", "max"):
-            o = self.corr_override[b]
-            if o:
-                c[f"{b}_kw"] = o["value"]
-        return c
+    def gap_min(self) -> float:
+        """Разрыв между точками истории, начиная с которого считаем, что сервер не работал."""
+        return max(3 * self.sc.history_step_s, 3 * self.tick_s * self.clock.speed) / 60.0
 
     def tick(self):
         now = self.clock.now()
-        minute = dt_to_min(now)
+        t = self.mars.t(now)
         to_off: list[int] = []
         with self._lock:
             dt_s = 0.0 if self._last_now is None else (now - self._last_now).total_seconds()
             dt_s = min(max(dt_s, 0.0), 120.0 * self.clock.speed)
             self._last_now = now
-            status = self._game_status(now)
+            status = self._status(t)
+            if status == "running":    # время до начала игры не считаем
+                dt_s = min(dt_s, (t - self.sc.start_t) * 60.0)
+            if not self._restart_checked:
+                self._restart_checked = True
+                self._report_outage(t, status)
 
-            self._run_scenario(now, minute, status, self._scenario_phase(now, status))
-            phase = self._phase(now, status)
-            self._solar_factor = (phase.solar_factor if phase else self.sc.defaults["solar_factor"]) * self.solar_admin
-            self.solar.set_factor(self._solar_factor)
+            self._run_messages(t, status)
+            self.solar.set_factor(self.solar_admin)
             self._expire(now)
-            corridor = self._corridor(phase)
 
             readings = self.relays.readings()
             gen = self.solar.power_kw()
             cons = sum(r.kw for r in readings.values() if r.on and r.online)
             dt_h = dt_s / 3600.0
 
-            deficit = curtailed = 0.0
+            deficit = 0.0
             if status == "running":
-                for bid, b in self.batteries.items():
-                    if bid == self.active:
-                        deficit, curtailed = b.step(gen - cons, dt_h, now)
-                        fault_key = f"fault:{bid}:{_iso(b.fault_until)}"
-                        if b.status == "fault" and fault_key not in self.fired:
-                            self.fired.add(fault_key)
-                            self.term.post(f"{b.name}: discharge power overload, battery protection tripped. "
-                                           f"Recovery at {b.fault_until:%H:%M}. Switch to another storage unit!",
-                                           "CRIT", now)
-                    else:
-                        b.idle(dt_h, now)
-                if self.active is None:
-                    deficit, curtailed = max(0.0, cons - gen), max(0.0, gen - cons)
+                deficit, curtailed = self.battery.step(gen - cons, dt_h, now)
                 self.stats["curtailed_kwh"] += curtailed * dt_h
                 self.stats["deficit_kwh"] += deficit * dt_h
-                penalties = phase.penalties if phase else self.sc.defaults["penalties"]
                 if not self.crisis_paused:
-                    to_off += self._check_violations(now, dt_s, cons, deficit, corridor, penalties, readings)
+                    to_off += self._check(now, dt_s, gen, cons, deficit, readings)
             else:
-                for b in self.batteries.values():
-                    b.power_kw = 0.0
+                self.battery.power_kw = 0.0
 
             self._gen, self._cons, self._deficit = gen, cons, deficit
 
-            # всё, что заблокировано/отключено, но физически включено — выключаем
+            # всё, что заблокировано, но физически включено — выключаем
             for lid, r in readings.items():
-                if r.on and self._line_block(lid, now, phase) and time.time() - self.lines[lid].last_enforce > 3:
+                if r.on and self._line_block(lid, now) and time.time() - self.lines[lid].last_enforce > 3:
                     self.lines[lid].last_enforce = time.time()
                     to_off.append(lid)
 
-            self._sample_history(now, minute, gen, cons, corridor, readings, status)
-            self._snap = self._build_snapshot(now, minute, status, phase, corridor, readings)
+            self._sample_history(now, t, gen, cons, readings, status)
+            self._snap = self._build_snapshot(now, t, status, readings)
             if time.time() - self._last_save > 5:
                 self._save_state()
                 self._last_save = time.time()
 
         for lid in dict.fromkeys(to_off):
             self.relays.set(lid, False)
+        if to_off:
+            self._refresh()
+
+    def _report_outage(self, t: float, status: str):
+        if status != "running" or not self.history:
+            return
+        last = self.history[-1]["t"]
+        if t - last > self.gap_min():
+            self.term.post(f"Link with the dome restored. No telemetry from {self.mars.label(last)} "
+                           f"to {self.mars.label(t)}.", "WARN", self.clock.now())
+            self.actions.info("RESTART gap %.1f min", t - last)
 
     # ------------------------------------------------------------------ сценарий
-    def _apply_batteries(self, spec: dict):
-        for bid, fields in (spec or {}).items():
-            b = self.batteries.get(str(bid))
-            if b:
-                b.update(**fields)
-
-    def _run_scenario(self, now, minute, status, phase):
-        if phase and f"phase:{phase.idx}" not in self.fired:
-            self.fired.add(f"phase:{phase.idx}")
-            if phase.message:
-                self.term.post(phase.message["text"], phase.message["level"], now)
-            self._apply_batteries(phase.batteries)
-            if phase.locked_lines:
-                ids = [self.map.resolve(r) for r in phase.locked_lines]
-                names = ", ".join(self.name(l) for l in ids if l in self.lines)
-                if names:
-                    self.term.post(f"Locked by order of Mission Control: {names}.", "WARN", now)
-        if status == "finished" and "end" not in self.fired:
-            self.fired.add("end")
-            self.term.post("The game day is over. Thank you for your shift, dispatcher!", "OK", now)
-        for e in self.sc.events:
-            key = f"event:{e.idx}"
-            if key in self.fired or e.at > minute or status == "finished":
+    def _run_messages(self, t: float, status: str):
+        if status == "before":
+            return
+        for m in self.sc.messages:
+            if m.t > t:
+                break
+            if m.key in self.fired:
                 continue
-            if status == "before" and self.sc.date and now.date() < date.fromisoformat(self.sc.date):
-                continue
-            self.fired.add(key)
-            if e.message:
-                self.term.post(e.message, e.level, now)
-            self._apply_batteries(e.batteries)
-            if e.set_active_battery:
-                self.active = e.set_active_battery
-            if e.lock_lines:
-                until = now + timedelta(minutes=float(e.lock_lines.get("duration_min", 30)))
-                reason = e.lock_lines.get("reason", "Locked by scenario")
-                for ref in e.lock_lines.get("lines", []):
-                    ls = self.lines.get(self.map.resolve(ref))
-                    if ls:
-                        ls.lock_until, ls.lock_reason = until, reason
+            self.fired.add(m.key)
+            self.term.post(m.text, m.level, self.mars.dt(m.t))
 
     def _expire(self, now):
+        freed = []
         for lid, ls in self.lines.items():
-            if ls.lock_until and now >= ls.lock_until:
-                ls.lock_until, ls.lock_reason = None, ""
-                self.term.post(f"{self.name(lid)}: lock lifted, the line can be switched on.", "OK", now)
             if ls.trip_until and now >= ls.trip_until:
-                ls.trip_until, ls.trip_reason = None, ""
-                self.term.post(f"{self.name(lid)}: emergency lock lifted, the line can be switched on.", "OK", now)
+                ls.trip_until = None
+                freed.append(self.name(lid))
             if ls.admin_lock and ls.admin_until and now >= ls.admin_until:
                 ls.admin_lock, ls.admin_until, ls.admin_reason = False, None, ""
                 self.actions.info("ADMIN LOCK EXPIRED line=%d", lid)
-        for b, o in self.corr_override.items():
-            if o and o["until"] and now >= o["until"]:
-                self.corr_override[b] = None
-                self.actions.info("ADMIN CORRIDOR %s override expired", b)
+        if freed:
+            self.term.post(f"Lock lifted, the line{'s' if len(freed) > 1 else ''} can be switched on: "
+                           f"{', '.join(freed)}.", "OK", now)
+        b = self.battery
+        if b.off_until and now >= b.off_until:
+            b.off_until = None
+            self.term.post(f"{b.name} reconnected to the grid.", "OK", now)
 
-    def _phase_lock(self, lid, phase) -> str | None:
-        for ref, reason in phase.locked_lines.items():
-            if self.map.resolve(ref) == lid:
-                return reason
-        return None
-
-    def _line_block(self, lid, now, phase) -> tuple[str, str, datetime | None] | None:
+    def _line_block(self, lid, now) -> tuple[str, str, datetime | None] | None:
         """Почему линию нельзя включать: (тип, причина, до какого времени) или None."""
         ls = self.lines[lid]
         if ls.admin_lock and (ls.admin_until is None or now < ls.admin_until):
             return "locked", ls.admin_reason or ADMIN_LOCK_REASON, ls.admin_until
         if ls.trip_until and now < ls.trip_until:
-            return "tripped", ls.trip_reason, ls.trip_until
-        if ls.lock_until and now < ls.lock_until:
-            return "locked", ls.lock_reason, ls.lock_until
-        if phase and ls.unlock_phase != phase.idx:
-            reason = self._phase_lock(lid, phase)
-            if reason:
-                end = datetime.combine(now.date(), datetime.min.time()) + timedelta(minutes=phase.end)
-                return "locked", reason, end
+            return "tripped", SHED_REASON, ls.trip_until
         return None
 
-    # ------------------------------------------------------------------ коридор
-    def _check_violations(self, now, dt_s, cons, deficit, corridor, penalties, readings) -> list[int]:
+    # ------------------------------------------------------------------ игровые ситуации
+    def min_kw(self, gen: float, now: datetime) -> float | None:
+        """Нижняя граница потребления: генерация − макс. мощность заряда.
+        None — не действует (АКБ отключён или полный: излишек просто теряется)."""
+        b = self.battery
+        if not b.connected(now) or b.full:
+            return None
+        return max(0.0, gen - b.max_charge_kw)
+
+    def _grace_s(self, kind: str) -> float:
+        r = self.rules
+        return {"overload": r["overload_grace_min"] * 60, "surplus": r["surplus_grace_min"] * 60,
+                "deficit": r["deficit_grace_s"]}[kind]
+
+    def _check(self, now, dt_s, gen, cons, deficit, readings) -> list[int]:
+        r = self.rules
+        lo = self.min_kw(gen, now)
         cond = {
-            "overload": cons > corridor["max_kw"],
-            "underload": cons < corridor["min_kw"],
+            "overload": cons > r["max_kw"],
+            "surplus": lo is not None and cons < lo - 1e-6,
             "deficit": deficit > 0.01,
         }
-        if cond["overload"] or cond["underload"]:
-            self.stats["out_of_corridor_s"] += dt_s
-        if cond["deficit"]:
-            self.stats["deficit_s"] += dt_s
         to_off = []
         for kind, bad in cond.items():
-            spec = penalties[f"on_{kind}"]
-            pu = self.penalty_until[kind]
-            if pu and now < pu:          # последствие уже действует — не наказываем повторно
-                self.timers[kind] = 0.0
-                continue
+            a = self.alarms[kind]
             if not bad:
-                if self.warned[kind]:
-                    self.term.post(f"{KIND_TITLES[kind]}: parameters are back to normal.", "OK", now)
-                self.timers[kind], self.warned[kind] = 0.0, False
+                if a.active:
+                    a.ok_s += dt_s
+                    if a.ok_s >= r["clear_s"] or kind == "deficit":
+                        if kind != "deficit":
+                            self.term.post(f"{TITLES[kind]} cleared: parameters are back to normal.", "OK", now)
+                        self.alarms[kind] = Alarm()
                 continue
-            self.timers[kind] += dt_s
-            grace = float(spec.get("grace_s", 30))
-            if not self.warned[kind]:
-                self.warned[kind] = True
-                self.term.post(KIND_WARN[kind].format(cons=cons, max=corridor["max_kw"], min=corridor["min_kw"],
-                                                      deficit=deficit, grace=grace), "WARN", now)
-            if self.timers[kind] >= grace:
-                to_off += self._apply_penalty(kind, spec, now, cons, deficit, corridor, readings)
-                self.timers[kind], self.warned[kind] = 0.0, False
+            if not a.active:
+                a.active, a.elapsed_s = True, 0.0
+                self._warn(kind, now, gen, cons)
+            a.ok_s = 0.0
+            a.elapsed_s += dt_s
+            if a.elapsed_s >= self._grace_s(kind):
+                to_off += self._consequence(kind, now, gen, cons, deficit, readings)
+                self.alarms[kind] = Alarm()
         return to_off
 
-    def _pick_lines(self, trip, kind, cons, deficit, corridor, readings) -> list[int]:
-        on = sorted((lid for lid, r in readings.items() if r.on), key=lambda l: -readings[l].kw)
-        if trip == "all":
-            return on
-        if isinstance(trip, list):
-            return [l for l in (self.map.resolve(x) for x in trip) if l is not None]
-        if isinstance(trip, str) and trip.startswith("top:"):
-            return on[:int(trip[4:])]
-        # auto: отключаем самые мощные, пока не уйдём из нарушения
+    def _warn(self, kind, now, gen, cons):
+        r, b = self.rules, self.battery
         if kind == "overload":
-            need = cons - corridor["max_kw"]
-        elif kind == "deficit":
-            need = deficit
-        else:
-            return on
-        out, removed = [], 0.0
-        for lid in on:
-            if removed >= need and out:
-                break
-            out.append(lid)
-            removed += readings[lid].kw
-        return out
+            self.stats["overload"] += 1
+            self.term.post(f"OVERLOAD: consumption {cons:.2f} kW is above the {r['max_kw']:.2f} kW limit. "
+                           f"Reduce the load, otherwise BLACKOUT in {r['overload_grace_min']:g} min.", "WARN", now)
+        elif kind == "surplus":
+            self.stats["surplus"] += 1
+            self.term.post(f"BATTERY OVERCHARGE: generation surplus {gen - cons:.2f} kW exceeds the "
+                           f"{b.max_charge_kw:.2f} kW charge limit. Increase consumption, otherwise the battery "
+                           f"disconnects in {r['surplus_grace_min']:g} min for {r['battery_off_min']:g} min.",
+                           "WARN", now)
 
-    def _apply_penalty(self, kind, spec, now, cons, deficit, corridor, readings) -> list[int]:
-        dur = float(spec.get("duration_min", 10))
-        until = now + timedelta(minutes=dur)
-        ids = [l for l in self._pick_lines(spec.get("trip", "auto"), kind, cons, deficit, corridor, readings)
-               if l in self.lines]
-        reason = f"{KIND_TITLES[kind]}: emergency trip"
+    def _consequence(self, kind, now, gen, cons, deficit, readings) -> list[int]:
+        r, b = self.rules, self.battery
+        if kind == "overload":
+            ids = [lid for lid, x in readings.items() if x.on]
+            self.stats["blackouts"] += 1
+            self.term.post(f"BLACKOUT: consumption stayed above {r['max_kw']:.2f} kW for "
+                           f"{r['overload_grace_min']:g} min. All lines have been de-energized. "
+                           f"You may switch them back on.", "CRIT", now)
+            self.actions.info("BLACKOUT lines=%s", ids)
+            return ids
+        if kind == "surplus":
+            b.off_until = now + timedelta(minutes=r["battery_off_min"])
+            self.stats["battery_off"] += 1
+            self.term.post(f"{b.name} DISCONNECTED until {self._label(b.off_until)}: the charge limit was exceeded "
+                           f"for {r['surplus_grace_min']:g} min. Without storage, consumption must not exceed "
+                           f"generation.", "CRIT", now)
+            self.actions.info("BATTERY OFF until=%s", b.off_until)
+            return []
+        # дефицит: отключаем по приоритету, начиная с наименее важных (13 → 1)
+        on = sorted((lid for lid, x in readings.items() if x.on and x.online), key=lambda l: -self.priority[l])
+        ids, removed = [], 0.0
+        for lid in on:
+            if removed >= deficit:
+                break
+            ids.append(lid)
+            removed += readings[lid].kw
+        if not ids:
+            return []
+        until = now + timedelta(minutes=r["deficit_lock_min"])
         for lid in ids:
-            ls = self.lines[lid]
-            ls.trip_until = max(ls.trip_until or until, until)
-            ls.trip_reason = reason
-        self.penalty_until[kind] = until
-        self.stats[kind] += 1
-        names = ", ".join(self.name(l) for l in ids)
-        tail = f" Tripped: {names}. Locked until {until:%H:%M}." if ids else f" Active until {until:%H:%M}."
-        self.term.post(spec.get("message", reason) + tail, spec.get("level", "CRIT"), now)
-        self.actions.info("PENALTY %s lines=%s until=%s", kind, ids, until)
+            self.lines[lid].trip_until = until
+        self.stats["sheds"] += 1
+        self.stats["lines_shed"] += len(ids)
+        names = ", ".join(f"{self.name(l)} (#{self.priority[l]})" for l in ids)
+        self.term.post(f"POWER DEFICIT {deficit:.2f} kW: generation and battery cannot cover the load. "
+                       f"Load shedding by priority: {names}. Locked until {self._label(until)}.", "CRIT", now)
+        self.actions.info("SHED deficit=%.2f lines=%s until=%s", deficit, ids, until)
         return ids
 
     # ------------------------------------------------------------------ действия участников
@@ -410,13 +367,13 @@ class Engine:
         with self._lock:
             if lid not in self.lines:
                 return False, "Нет такой линии" if ru else "No such line"
-            block = self._line_block(lid, now, self._phase(now))
+            block = self._line_block(lid, now)
             if on and block:
                 kind, reason, until = block
                 if ru:
-                    what = "аварийно отключена" if kind == "tripped" else "заблокирована"
-                    return False, f"{what}: {reason}" + (f" (до {until:%H:%M})" if until else "") + ". Сначала unlock"
-                return False, f"{reason} (until {until:%H:%M})" if until else reason
+                    what = "отключена при дефиците" if kind == "tripped" else "заблокирована"
+                    return False, f"{what}" + (f" (до {self._label(until)})" if until else "") + ". Сначала unlock"
+                return False, f"{reason} (until {self._hm(until)})" if until else reason
         ok = self.relays.set(lid, on)
         self.actions.info("%s %d %s -> %s", who, lid, "ON" if on else "OFF", "ok" if ok else "FAIL")
         if not ok:
@@ -424,21 +381,22 @@ class Engine:
         self._refresh()
         return True, ""
 
-    def set_active_battery(self, bid: str, force: bool = False) -> tuple[bool, str]:
-        now = self.clock.now()
+    def set_priority(self, lid: int, prio: int, who: str = "PRIORITY") -> tuple[bool, str]:
+        """Поставить линии приоритет prio; линия, у которой он был, получает старый приоритет."""
+        ru = who.startswith("ADMIN")
         with self._lock:
-            b = self.batteries.get(bid)
-            if not b:
-                return False, f"Нет АКБ '{bid}'" if force else "No such storage unit"
-            if not b.working and not force:
-                return False, f"{b.name} is unavailable ({'protection' if b.status == 'fault' else 'failure'})"
-            if self.active != bid:
-                self.active = bid
-                if not force:
-                    self.term.post(f"Active storage unit: {b.name}.", "INFO", now)
-                self.actions.info("%s active=%s", "ADMIN BATTERY" if force else "BATTERY", bid)
-            self._snap["active_battery"] = bid
-            return True, ""
+            if lid not in self.lines:
+                return False, "Нет такой линии" if ru else "No such line"
+            if not 1 <= prio <= len(self.lines):
+                return False, (f"Приоритет — от 1 до {len(self.lines)}" if ru
+                               else f"Priority must be 1–{len(self.lines)}")
+            old = self.priority[lid]
+            other = next(l for l, p in self.priority.items() if p == prio)
+            self.priority[other], self.priority[lid] = old, prio
+            self.actions.info("%s line=%d %d->%d (line %d -> %d)", who, lid, old, prio, other, old)
+            self._save_state()
+        self._refresh()
+        return True, ""
 
     def admin_message(self, text: str, level: str = "INFO"):
         self.term.post(text, level, self.clock.now())
@@ -451,11 +409,8 @@ class Engine:
         with self._lock:
             if not self._snap:
                 return
-            status = self._game_status(now)
-            phase = self._phase(now, status)
-            self._solar_factor = (phase.solar_factor if phase else self.sc.defaults["solar_factor"]) * self.solar_admin
-            self.solar.set_factor(self._solar_factor)
-            self._snap = self._build_snapshot(now, dt_to_min(now), status, phase, self._corridor(phase), readings)
+            t = self.mars.t(now)
+            self._snap = self._build_snapshot(now, t, self._status(t), readings)
 
     # ------------------------------------------------------------------ админка
     def admin_line(self, lid: int, action: str, minutes: float | None = None,
@@ -475,11 +430,7 @@ class Engine:
                 self.actions.info("ADMIN LOCK line=%d until=%s reason=%s", lid, ls.admin_until, ls.admin_reason)
             elif action == "unlock":
                 ls.admin_lock, ls.admin_until, ls.admin_reason = False, None, ""
-                ls.lock_until, ls.lock_reason = None, ""
-                ls.trip_until, ls.trip_reason = None, ""
-                phase = self._phase(now)
-                if phase and self._phase_lock(lid, phase):
-                    ls.unlock_phase = phase.idx
+                ls.trip_until = None
                 self.actions.info("ADMIN UNLOCK line=%d", lid)
             else:
                 return False, f"Неизвестное действие '{action}'"
@@ -511,162 +462,109 @@ class Engine:
         self.actions.info("ADMIN IDENTIFY line=%d", lid)
         return True, ""
 
-    def admin_corridor(self, bound: str, value: float | None, minutes: float | None = None) -> tuple[bool, str]:
-        """value=None — вернуть границу из сценария. bound: min | max | all (только для сброса)."""
-        now = self.clock.now()
+    def admin_settings(self, section: str, values: dict) -> tuple[bool, str]:
+        """Параметры АКБ / правила: действуют сразу и записываются в server.yaml."""
         with self._lock:
-            if value is None:
-                for b in (("min", "max") if bound == "all" else (bound,)):
-                    self.corr_override[b] = None
-                self.actions.info("ADMIN CORRIDOR reset %s", bound)
-                self._refresh()
-                return True, ""
-            if bound not in ("min", "max"):
-                return False, "Граница — min или max"
-            if value < 0:
-                return False, "Значение должно быть >= 0"
-            cur = self._corridor(self._phase(now))
-            if bound == "min" and value >= cur["max_kw"]:
-                return False, f"min должен быть меньше текущего max ({cur['max_kw']:.2f} кВт)"
-            if bound == "max" and value <= cur["min_kw"]:
-                return False, f"max должен быть больше текущего min ({cur['min_kw']:.2f} кВт)"
-            until = now + timedelta(minutes=minutes) if minutes else None
-            self.corr_override[bound] = {"value": float(value), "until": until}
-            self.actions.info("ADMIN CORRIDOR %s=%.2f until=%s", bound, value, until)
-            self._refresh()
-            return True, ""
+            ok, msg = self.settings.update(section, values)
+            if ok:
+                b = self.battery
+                b.charge_kwh = min(b.charge_kwh, b.capacity_kwh)
+                self.actions.info("ADMIN SETTINGS %s %s", section, values)
+        self._refresh()
+        return ok, msg
 
-    def admin_battery(self, bid: str, fields: dict) -> tuple[bool, str]:
+    def admin_battery(self, charge_kwh: float | None = None, soc: float | None = None,
+                      connect: bool | None = None, minutes: float | None = None) -> tuple[bool, str]:
+        """Состояние АКБ: заряд (кВт·ч или %), подключить / отключить (на N минут или до connect)."""
         now = self.clock.now()
         with self._lock:
-            b = self.batteries.get(bid)
-            if not b:
-                return False, f"Нет АКБ '{bid}'. Есть: {', '.join(self.batteries)}"
-            upd = {}
-            for k, v in fields.items():
-                if k == "soc":   # удобство: заряд в процентах от ёмкости
-                    try:
-                        upd["charge_kwh"] = b.capacity_kwh * float(v) / 100.0
-                    except ValueError:
-                        return False, f"soc: '{v}' — не число"
-                    continue
-                if k not in BATTERY_FIELDS:
-                    return False, f"Неизвестное поле '{k}'. Поля: soc, {', '.join(BATTERY_FIELDS)}"
-                if BATTERY_FIELDS[k] is float:
-                    try:
-                        v = float(v)
-                    except ValueError:
-                        return False, f"{k}: '{v}' — не число"
-                    if v < 0 or (k == "efficiency" and v > 1):
-                        return False, f"{k}: значение вне допустимого диапазона"
-                if k == "status":
-                    v = str(v).lower()
-                    if v not in BATTERY_STATUSES:
-                        return False, f"status — одно из: {', '.join(BATTERY_STATUSES)}"
-                upd[k] = v
-            if upd.get("status") == "fault":
-                upd.pop("status")
-                b.update(**upd)
-                if b.status != "fault":
-                    b.status_before_fault = b.status if b.working else "ok"
-                    b.status = "fault"
-                b.fault_until = now + timedelta(minutes=b.fault_recovery_min)
-                b.overload_s = 0.0
-            else:
-                b.update(**upd)
-            if b.capacity_kwh > (b.nominal_kwh or 0):
-                b.nominal_kwh = b.capacity_kwh
-            self.actions.info("ADMIN BATTERY %s %s", bid, fields)
-            self._refresh()
-            return True, ""
+            b = self.battery
+            if soc is not None:
+                charge_kwh = b.capacity_kwh * soc / 100.0
+            if charge_kwh is not None:
+                if charge_kwh < 0:
+                    return False, "Заряд не может быть отрицательным"
+                b.charge_kwh = min(charge_kwh, b.capacity_kwh)
+            if connect is True:
+                b.off_until = None
+            elif connect is False:
+                # «бессрочно» — до конца игры
+                b.off_until = now + timedelta(minutes=minutes) if minutes else self.mars.dt(self.sc.end_t)
+            self.actions.info("ADMIN BATTERY charge=%s soc=%s connect=%s minutes=%s", charge_kwh, soc, connect, minutes)
+        self._refresh()
+        return True, ""
 
     def admin_solar(self, factor: float) -> tuple[bool, str]:
         if not 0.0 <= factor <= 2.0:
             return False, "Коэффициент генерации — от 0.0 до 2.0"
         with self._lock:
             self.solar_admin = float(factor)
+            self.solar.set_factor(self.solar_admin)
             self.actions.info("ADMIN SOLAR factor=%.2f", factor)
         self._refresh()
         return True, ""
 
     def admin_crisis(self, action: str) -> tuple[bool, str]:
-        """Нарушения коридора/дефицит: pause — заморозить отсчёт и наказания, resume, cancel —
-        сбросить отсчёт, действующие последствия и аварийные отключения линий."""
+        """pause — заморозить отслеживание нарушений, resume, cancel — сбросить отсчёты,
+        снять блокировки после дефицита и подключить АКБ."""
         with self._lock:
             if action == "pause":
                 self.crisis_paused = True
             elif action == "resume":
                 self.crisis_paused = False
             elif action == "cancel":
-                for k in KIND_TITLES:
-                    self.timers[k], self.warned[k], self.penalty_until[k] = 0.0, False, None
+                self.alarms = {k: Alarm() for k in KINDS}
                 for ls in self.lines.values():
-                    ls.trip_until, ls.trip_reason = None, ""
+                    ls.trip_until = None
+                self.battery.off_until = None
             else:
                 return False, "Допустимо: pause | resume | cancel"
             self.actions.info("ADMIN CRISIS %s", action)
         self._refresh()
         return True, ""
 
-    def admin_phase(self, action: str) -> tuple[bool, str]:
-        """Текущая фаза сценария: pause (до resume) | cancel (до конца дня) | resume."""
-        now = self.clock.now()
+    def admin_time(self, s: str) -> tuple[bool, str]:
+        try:
+            t = self.mars.parse(s)
+            self.clock.set_time(self.mars.dt(t))
+        except (RuntimeError, ValueError) as e:
+            return False, str(e)
         with self._lock:
-            p = self._scenario_phase(now)
-            if action == "resume":
-                if p is not None and p.idx in self.phase_off:
-                    del self.phase_off[p.idx]
-                elif self.phase_off:      # вне фазы — снять паузы со всех
-                    self.phase_off = {i: s for i, s in self.phase_off.items() if s != "paused"}
-                else:
-                    return False, "Нечего возобновлять"
-            elif action in ("pause", "cancel"):
-                if p is None:
-                    return False, "Сейчас нет активной фазы сценария"
-                self.phase_off[p.idx] = "paused" if action == "pause" else "cancelled"
-            else:
-                return False, "Допустимо: pause | resume | cancel"
-            self.actions.info("ADMIN PHASE %s %s", action, p.name if p else "-")
-        self._refresh()
+            self._last_now = self._last_sample = None
+            # перемотка назад: «будущее» стираем из истории, сообщения сценария придут снова
+            if self.history and self.history[-1]["t"] > t:
+                self.history = [h for h in self.history if h["t"] <= t]
+                self._rewrite_history()
+            self.fired = {k for k in self.fired if not any(m.key == k and m.t > t for m in self.sc.messages)}
+            self.actions.info("ADMIN TIME %s", s)
+        self.tick()
         return True, ""
 
     def admin_view(self) -> dict:
         now = self.clock.now()
         with self._lock:
-            sp = self._scenario_phase(now)
-            phase = self._phase(now)
-            pen = phase.penalties if phase else self.sc.defaults["penalties"]
-            base = phase.corridor if phase else self.sc.defaults["corridor"]
             return {
+                "settings": self.settings.view(),
                 "solar_admin": self.solar_admin,
-                "solar_phase": phase.solar_factor if phase else self.sc.defaults["solar_factor"],
-                "solar_factor": self._solar_factor,
-                "corridor_base": {"min": base["min_kw"], "max": base["max_kw"]},
-                "corridor_override": {b: ({"value": o["value"], "until": _hm(o["until"])} if o else None)
-                                      for b, o in self.corr_override.items()},
                 "crisis": {
                     "paused": self.crisis_paused,
-                    "timers": {k: {"elapsed_s": round(self.timers[k], 1),
-                                   "grace_s": float(pen[f"on_{k}"].get("grace_s", 30))} for k in KIND_TITLES},
-                    "penalties": {k: _hm(v) for k, v in self.penalty_until.items() if v and now < v},
+                    "alarms": {k: {"active": a.active, "elapsed_s": round(a.elapsed_s, 1),
+                                   "grace_s": self._grace_s(k)} for k, a in self.alarms.items()},
                 },
-                "phase": {"name": sp.name if sp else None, "idx": sp.idx if sp else None,
-                          "state": (self.phase_off.get(sp.idx, "active") if sp else None),
-                          "to": f"{sp.end // 60:02d}:{sp.end % 60:02d}" if sp else None},
-                "phases": [{"idx": p.idx, "name": p.name,
-                            "from": f"{p.start // 60:02d}:{p.start % 60:02d}",
-                            "to": f"{p.end // 60:02d}:{p.end % 60:02d}",
-                            "state": self.phase_off.get(p.idx, "scheduled")} for p in self.sc.phases],
                 "lines_map": self.map.view(),
-                "clock": {"mode": self.clock.mode, "speed": self.clock.speed},
+                "clock": {"mode": self.clock.mode, "speed": self.clock.speed,
+                          "earth": now.strftime("%Y-%m-%d %H:%M:%S")},
+                "game": {"start": self.mars.label(self.sc.start_t), "end": self.mars.label(self.sc.end_t),
+                         "start_earth": self.mars.dt(self.sc.start_t).strftime("%Y-%m-%d %H:%M"),
+                         "end_earth": self.mars.dt(self.sc.end_t).strftime("%Y-%m-%d %H:%M")},
             }
 
     # ------------------------------------------------------------------ данные для API
-    def _lines_view(self, now, phase, readings):
+    def _lines_view(self, now, readings):
         out = []
         for lid in self.lines:
             r = readings[lid]
-            block = self._line_block(lid, now, phase)
+            block = self._line_block(lid, now)
             if not r.online:
                 st = "offline"
             elif block:
@@ -675,31 +573,38 @@ class Engine:
                 st = "on" if r.on else "off"
             out.append({"id": lid, "name": self.name(lid), "key": self.map.key(lid),
                         "on": r.on, "kw": round(r.kw if r.on else 0.0, 3),
-                        "online": r.online, "status": st,
+                        "online": r.online, "status": st, "priority": self.priority[lid],
                         "reason": block[1] if block else "",
-                        "until": _hm(block[2]) if block else None})
+                        "until": self._hm(block[2]) if block else None,
+                        "until_t": round(self.mars.t(block[2]), 3) if block and block[2] else None})
         return out
 
-    def _build_snapshot(self, now, minute, status, phase, corridor, readings) -> dict:
-        pen = phase.penalties if phase else self.sc.defaults["penalties"]
+    def _build_snapshot(self, now, t, status, readings) -> dict:
+        b, r = self.battery, self.rules
+        lo = self.min_kw(self._gen, now)
         alarms = []
         if not self.crisis_paused:
-            for k in KIND_TITLES:
-                if self.timers[k] > 0:
-                    grace = float(pen[f"on_{k}"].get("grace_s", 30))
-                    alarms.append({"kind": k, "title": KIND_TITLES[k],
-                                   "left_s": round(max(0.0, grace - self.timers[k]) / self.clock.speed, 1)})
+            for k, a in self.alarms.items():
+                if a.active:
+                    grace = self._grace_s(k)
+                    alarms.append({"kind": k, "title": TITLES[k], "grace_s": grace,
+                                   "left_s": round(max(0.0, grace - a.elapsed_s) / self.clock.speed, 1)})
         return {
-            "now": now.strftime("%H:%M:%S"), "date": now.strftime("%d.%m.%Y"), "t": round(minute, 3),
-            "day": self.sc.day, "status": status, "phase": phase.name if phase else None,
-            "start": self.sc.start, "end": self.sc.end, "speed": self.clock.speed,
+            "t": round(t, 3), "sol": self.mars.sol(t), "time": self.mars.hm(t, seconds=True),
+            "sol_min": self.mars.sol_min, "start_t": self.sc.start_t, "end_t": self.sc.end_t,
+            "name": self.sc.name, "status": status, "speed": self.clock.speed,
             "gen": round(self._gen, 3), "cons": round(self._cons, 3), "net": round(self._gen - self._cons, 3),
             "deficit": round(self._deficit, 3),
-            "corridor": {"min": corridor["min_kw"], "max": corridor["max_kw"]},
-            "lines": self._lines_view(now, phase, readings),
-            "batteries": [b.to_dict() for b in self.batteries.values()],
-            "active_battery": self.active,
+            "limits": {"max": r["max_kw"], "min": None if lo is None else round(lo, 3),
+                       "max_charge": b.max_charge_kw, "max_discharge": b.max_discharge_kw},
+            "lines": self._lines_view(now, readings),
+            "battery": {"name": b.name, "capacity_kwh": b.capacity_kwh, "charge_kwh": round(b.charge_kwh, 3),
+                        "soc": round(b.soc, 4), "power_kw": round(b.power_kw, 3), "full": b.full,
+                        "max_charge_kw": b.max_charge_kw, "max_discharge_kw": b.max_discharge_kw,
+                        "connected": b.connected(now), "off_until": self._hm(b.off_until)
+                        if not b.connected(now) else None},
             "alarms": alarms,
+            "paused": self.crisis_paused,
             "stats": {k: (round(v, 3) if isinstance(v, float) else v) for k, v in self.stats.items()},
         }
 
@@ -707,36 +612,54 @@ class Engine:
         with self._lock:
             return dict(self._snap)
 
-    def history_view(self) -> list[dict]:
+    def history_view(self, since: float | None = None) -> list[dict]:
         with self._lock:
-            return list(self.history)
+            if since is None:
+                return list(self.history)
+            return [h for h in self.history if h["t"] > since]
+
+    def gaps(self) -> list[list[float]]:
+        """Промежутки, когда сервер не работал: [[t_от, t_до], ...]."""
+        thr = self.gap_min()
+        with self._lock:
+            h = self.history
+            return [[h[i - 1]["t"], h[i]["t"]] for i in range(1, len(h)) if h[i]["t"] - h[i - 1]["t"] > thr]
 
     def forecast_view(self) -> dict:
-        return self.forecast.as_dict(self.sc.start, self.sc.end)
+        return self.forecast.as_dict(self.sc.start_t, self.sc.end_t)
 
     # ------------------------------------------------------------------ история / сохранение
     def _csv_header(self) -> list[str]:
-        return (["time", "t", "gen_kw", "cons_kw", "min_kw", "max_kw", "active"]
-                + [f"soc_{b}_kwh" for b in self.batteries] + [f"L{l}_kw" for l in sorted(self.lines)])
+        return (["time", "t", "gen_kw", "cons_kw", "max_kw", "min_kw", "soc_kwh", "bat_kw", "bat_off"]
+                + [f"L{l}_kw" for l in sorted(self.lines)])
 
-    def _sample_history(self, now, minute, gen, cons, corridor, readings, status):
+    def _sample_history(self, now, t, gen, cons, readings, status):
         if status != "running":
             return
-        if self._last_sample and (now - self._last_sample).total_seconds() < self.sc.history_step_s:
+        if self._last_sample and 0 <= (now - self._last_sample).total_seconds() < self.sc.history_step_s:
             return
         self._last_sample = now
-        s = {"t": round(minute, 3), "gen": round(gen, 3), "cons": round(cons, 3),
-             "min": corridor["min_kw"], "max": corridor["max_kw"], "active": self.active,
-             "per": [round(readings[l].kw if readings[l].on else 0.0, 3) for l in sorted(readings)],
-             "soc": {bid: round(b.charge_kwh, 3) for bid, b in self.batteries.items()}}
+        b = self.battery
+        lo = self.min_kw(gen, now)
+        s = {"t": round(t, 3), "gen": round(gen, 3), "cons": round(cons, 3),
+             "max": self.rules["max_kw"], "min": None if lo is None else round(lo, 3),
+             "soc": round(b.charge_kwh, 3), "bat": round(b.power_kw, 3), "boff": not b.connected(now),
+             "per": [round(readings[l].kw if readings[l].on else 0.0, 3) for l in sorted(readings)]}
         self.history.append(s)
         new = not os.path.exists(self.telemetry_path)
         with open(self.telemetry_path, "a", encoding="utf-8", newline="") as f:
             w = csv.writer(f)
             if new:
                 w.writerow(self._csv_header())
-            w.writerow([now.strftime("%Y-%m-%d %H:%M:%S"), s["t"], s["gen"], s["cons"], s["min"], s["max"],
-                        s["active"]] + [s["soc"][b] for b in self.batteries] + s["per"])
+            w.writerow([now.strftime("%Y-%m-%d %H:%M:%S"), s["t"], s["gen"], s["cons"], s["max"],
+                        "" if s["min"] is None else s["min"], s["soc"], s["bat"], int(s["boff"])] + s["per"])
+
+    def _rewrite_history(self):
+        with open(self.telemetry_path, encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+        keep = [rows[0]] + [r for r in rows[1:] if float(r[1]) <= (self.history[-1]["t"] if self.history else -1)]
+        with open(self.telemetry_path, "w", encoding="utf-8", newline="") as f:
+            csv.writer(f).writerows(keep)
 
     def _load_history(self):
         if not os.path.exists(self.telemetry_path):
@@ -744,19 +667,19 @@ class Engine:
         with open(self.telemetry_path, encoding="utf-8") as f:
             header = next(csv.reader(f), None)
         if header != self._csv_header():
-            # изменился состав линий/АКБ — старую историю откладываем в сторону
+            # изменился состав линий или формат — старую историю откладываем в сторону
             old = self.telemetry_path + time.strftime(".%Y%m%d-%H%M%S.old")
             os.replace(self.telemetry_path, old)
-            log.warning("Состав линий/АКБ изменился, история перенесена в %s", old)
+            log.warning("Формат истории изменился, история перенесена в %s", old)
             return
         with open(self.telemetry_path, encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 try:
                     self.history.append({
                         "t": float(row["t"]), "gen": float(row["gen_kw"]), "cons": float(row["cons_kw"]),
-                        "min": float(row["min_kw"]), "max": float(row["max_kw"]), "active": row["active"],
+                        "max": float(row["max_kw"]), "min": float(row["min_kw"]) if row["min_kw"] else None,
+                        "soc": float(row["soc_kwh"]), "bat": float(row["bat_kw"]), "boff": row["bat_off"] == "1",
                         "per": [float(row[k]) for k in row if k.startswith("L") and k.endswith("_kw")],
-                        "soc": {k[4:-4]: float(row[k]) for k in row if k.startswith("soc_")},
                     })
                 except (KeyError, ValueError):
                     continue
@@ -764,27 +687,16 @@ class Engine:
 
     def _save_state(self):
         data = {
-            "active": self.active,
             "fired": sorted(self.fired),
             "stats": self.stats,
-            "penalty_until": {k: _iso(v) for k, v in self.penalty_until.items()},
-            "batteries": {bid: {k: v for k, v in b.to_dict().items() if k not in ("soc",)}
-                          for bid, b in self.batteries.items()},
-            "lines": {lid: {"lock_until": _iso(l.lock_until), "lock_reason": l.lock_reason,
-                            "trip_until": _iso(l.trip_until), "trip_reason": l.trip_reason,
-                            "admin_lock": l.admin_lock, "admin_until": _iso(l.admin_until),
-                            "admin_reason": l.admin_reason, "unlock_phase": l.unlock_phase}
+            "battery": {"charge_kwh": self.battery.charge_kwh, "off_until": _iso(self.battery.off_until)},
+            "priority": {str(l): p for l, p in self.priority.items()},
+            "alarms": {k: {"active": a.active, "elapsed_s": a.elapsed_s} for k, a in self.alarms.items()},
+            "lines": {lid: {"trip_until": _iso(l.trip_until), "admin_lock": l.admin_lock,
+                            "admin_until": _iso(l.admin_until), "admin_reason": l.admin_reason}
                       for lid, l in self.lines.items()},
-            "admin": {
-                "solar": self.solar_admin,
-                "crisis_paused": self.crisis_paused,
-                "phase_off": self.phase_off,
-                "corridor": {b: ({"value": o["value"], "until": _iso(o["until"])} if o else None)
-                             for b, o in self.corr_override.items()},
-            },
+            "admin": {"solar": self.solar_admin, "crisis_paused": self.crisis_paused},
         }
-        for bid, b in self.batteries.items():
-            data["batteries"][bid]["fault_until"] = _iso(b.fault_until)
         tmp = self.state_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
@@ -795,35 +707,26 @@ class Engine:
             return
         with open(self.state_path, encoding="utf-8") as f:
             data = json.load(f)
-        self.active = data.get("active", self.active)
         self.fired = set(data.get("fired", []))
-        self.stats.update(data.get("stats", {}))
-        self.penalty_until = {k: _from_iso(v) for k, v in data.get("penalty_until", {}).items()} or self.penalty_until
-        for bid, fields in data.get("batteries", {}).items():
-            b = self.batteries.get(bid)
-            if not b:
-                continue
-            fields = dict(fields)
-            fields["fault_until"] = _from_iso(fields.get("fault_until"))
-            fields.pop("id", None)
-            fields.pop("voltage_v", None)   # напряжение — всегда из сценария
-            for k, v in fields.items():
-                if hasattr(b, k):
-                    setattr(b, k, v)
+        self.stats.update({k: v for k, v in data.get("stats", {}).items() if k in self.stats})
+        b = data.get("battery") or {}
+        if "charge_kwh" in b:
+            self.battery.charge_kwh = min(float(b["charge_kwh"]), self.battery.capacity_kwh)
+        self.battery.off_until = _from_iso(b.get("off_until"))
+        prio = {int(l): int(p) for l, p in (data.get("priority") or {}).items() if int(l) in self.lines}
+        if sorted(prio) == sorted(self.lines) and sorted(prio.values()) == list(range(1, len(self.lines) + 1)):
+            self.priority = prio
+        for k, a in (data.get("alarms") or {}).items():
+            if k in self.alarms:
+                self.alarms[k] = Alarm(bool(a.get("active")), float(a.get("elapsed_s", 0.0)))
         for lid, l in data.get("lines", {}).items():
             ls = self.lines.get(int(lid))
             if ls:
-                ls.lock_until, ls.lock_reason = _from_iso(l["lock_until"]), l["lock_reason"]
-                ls.trip_until, ls.trip_reason = _from_iso(l["trip_until"]), l["trip_reason"]
+                ls.trip_until = _from_iso(l.get("trip_until"))
                 ls.admin_lock = bool(l.get("admin_lock", False))
                 ls.admin_until = _from_iso(l.get("admin_until"))
                 ls.admin_reason = l.get("admin_reason", "")
-                ls.unlock_phase = l.get("unlock_phase")
         a = data.get("admin", {})
         self.solar_admin = float(a.get("solar", 1.0))
         self.crisis_paused = bool(a.get("crisis_paused", False))
-        self.phase_off = {int(k): v for k, v in (a.get("phase_off") or {}).items()}
-        for b, o in (a.get("corridor") or {}).items():
-            if b in self.corr_override and o:
-                self.corr_override[b] = {"value": float(o["value"]), "until": _from_iso(o.get("until"))}
         log.info("Состояние восстановлено из %s", self.state_path)

@@ -9,59 +9,41 @@ HELP = """\
   on <L>                       включить
   off <L>                      выключить
   lock <L> [мин] [причина...]  заблокировать и выключить; мин — игровые минуты (0 или без — до unlock)
-  unlock <L>                   снять любую блокировку: админа, сценария, аварийную, фазы
+  unlock <L>                   снять блокировку: админа или после дефицита
+  prio <линия> <1-13>          приоритет линии (13 отключается первой); линии меняются приоритетами
+  prio                         список приоритетов
   name <линия> <КЛЮЧ|->        привязать потребителя к линии (если ключ занят — линии меняются)
   names                        список потребителей и их линий
   blink <линия>                помигать линией 3 раза, чтобы найти её на площадке
-КОРИДОР
-  corr min <кВт> [мин]         переопределить нижнюю границу (на N игровых минут или до reset)
-  corr max <кВт> [мин]         переопределить верхнюю границу
-  corr reset [min|max]         вернуть значение из сценария
-АККУМУЛЯТОРЫ
-  bat <ID> поле=значение ...   например: bat A soc=50 max_discharge_kw=3 status=ok
-  bat fields                   список изменяемых полей
-  active <ID>                  принудительно сменить активный АКБ
+ГРАНИЦЫ И ПРАВИЛА (сохраняются в config/server.yaml)
+  max <кВт>                    верхняя граница коридора потребления
+  set поле=значение ...        правила, например: set overload_grace_min=5 battery_off_min=15
+  set                          список правил и текущих значений
+АККУМУЛЯТОР
+  bat поле=значение ...        параметры (сохраняются в server.yaml): capacity_kwh, initial_kwh,
+                               max_charge_kw, max_discharge_kw; состояние: soc=50 (%) или charge_kwh=10
+  bat off [мин]                отключить АКБ (на N игровых минут или до bat on)
+  bat on                       подключить АКБ
+  bat                          параметры АКБ
 КРИЗИС
-  crisis pause|resume|cancel   нарушения коридора/дефицит: заморозить отсчёт и наказания /
-                               продолжить / отменить (сброс отсчёта, последствий, аварийных отключений)
-  phase pause|resume|cancel    текущая фаза сценария (коридор, солнце, блокировки):
-                               пауза до resume / продолжить / отменить до конца дня
+  crisis pause|resume|cancel   нарушения: заморозить отслеживание / продолжить / отменить
+                               (сброс отсчётов, снятие блокировок после дефицита, подключение АКБ)
 ГЕНЕРАЦИЯ
-  solar <0.0-2.0>              масштаб генерации, умножается на коэффициент фазы
+  solar <0.0-2.0>              масштаб генерации относительно прогноза (буря — 0.3)
 ТЕРМИНАЛ
   msg [INFO|WARN|CRIT|OK] <текст>  сообщение в терминал участников (пишите по-английски)
 ПРОЧЕЕ
-  time ЧЧ:ММ                   перемотать игровое время (только clock.mode: sim)
+  time <сол> ЧЧ:ММ             перемотать время купола, например time 2 13:30 (только clock.mode: sim)
   help | quit                  ↑/↓ — история команд, Ctrl+Q — выход
 
 Действия консоли участникам не объявляются — при необходимости используйте msg."""
 
-BATTERY_FIELDS = (
-    ("soc", "заряд в % от ёмкости"),
-    ("charge_kwh", "заряд, кВт·ч"),
-    ("capacity_kwh", "текущая ёмкость, кВт·ч"),
-    ("nominal_kwh", "паспортная ёмкость, кВт·ч"),
-    ("max_charge_kw", "макс. мощность заряда, кВт"),
-    ("max_discharge_kw", "номинальная мощность разряда, кВт"),
-    ("peak_discharge_kw", "пиковая мощность разряда, кВт"),
-    ("efficiency", "КПД заряда, 0–1"),
-    ("self_discharge_pct_h", "саморазряд, % ёмкости в час"),
-    ("overload_tolerance_s", "сколько секунд терпит разряд выше номинала"),
-    ("fault_recovery_min", "длительность защиты, мин"),
-    ("status", "ok | degraded | fault | failed"),
-    ("name", "название (без пробелов)"),
-    ("description", "описание (без пробелов)"),
-)
+BATTERY_STATE = ("soc", "charge_kwh")
 LEVELS = ("INFO", "WARN", "CRIT", "OK")
 ACTIONS = {"on": "включена", "off": "выключена", "lock": "заблокирована", "unlock": "разблокирована"}
-CRISIS_DONE = {
-    "crisis": {"pause": "Нарушения на паузе: отсчёт и наказания заморожены",
+CRISIS_DONE = {"pause": "Отслеживание нарушений на паузе",
                "resume": "Отслеживание нарушений возобновлено",
-               "cancel": "Кризис отменён: отсчёт, последствия и аварийные отключения сняты"},
-    "phase": {"pause": "Фаза сценария приостановлена (действуют значения по умолчанию)",
-              "resume": "Фаза сценария возобновлена",
-              "cancel": "Фаза сценария отменена до конца дня"},
-}
+               "cancel": "Кризис отменён: отсчёты сброшены, блокировки после дефицита сняты, АКБ подключён"}
 
 
 class CommandError(Exception):
@@ -115,6 +97,20 @@ def _call(api: AdminClient, path: str, body: dict) -> None:
         raise CommandError(str(e)) from None
 
 
+def _kv(args: list[str]) -> dict:
+    out = {}
+    for kv in args:
+        k, sep, v = kv.partition("=")
+        if not sep:
+            raise CommandError(f"'{kv}': ожидается поле=значение")
+        out[k.strip().lower()] = v.strip().replace(",", ".")
+    return out
+
+
+def _fields(section: dict, values: dict) -> list[str]:
+    return [f"  {k:<20} {values[k]:<8g} {d}" for k, d in section.items()]
+
+
 def execute(text: str, api: AdminClient, state: dict | None) -> list[str]:
     args = text.split()
     if not args:
@@ -128,6 +124,7 @@ def execute(text: str, api: AdminClient, state: dict | None) -> list[str]:
     if state is None:
         raise CommandError("Ещё нет данных от сервера")
     name = {l["id"]: l["name"] for l in state["state"]["lines"]}
+    settings = state["admin"]["settings"]
 
     if cmd in ("on", "off", "lock", "unlock"):
         if not rest:
@@ -156,6 +153,18 @@ def execute(text: str, api: AdminClient, state: dict | None) -> list[str]:
             return [f"Линии {', '.join(map(str, ids))}: {ACTIONS[cmd]}"]
         return out + errors
 
+    if cmd in ("prio", "priority"):
+        if not rest:
+            lines = sorted(state["state"]["lines"], key=lambda l: -l["priority"])
+            return ["Приоритеты (первой отключается верхняя):"] + [
+                f"  #{l['priority']:<3} L{l['id']:<3} {l['name']}" for l in lines]
+        if len(rest) != 2:
+            raise CommandError("Формат: prio <линия> <1-13>")
+        lid = parse_lines(rest[0], state)[0]
+        prio = int(_num(rest[1], "приоритет"))
+        _call(api, "line/priority", {"line": lid, "priority": prio})
+        return [f"L{lid} {name[lid]}: приоритет #{prio}"]
+
     if cmd == "name":
         if len(rest) != 2:
             raise CommandError("Формат: name <линия> <КЛЮЧ|->")
@@ -178,51 +187,50 @@ def execute(text: str, api: AdminClient, state: dict | None) -> list[str]:
         _call(api, "line/identify", {"line": lid})
         return [f"L{lid}: мигает 3 раза"]
 
-    if cmd in ("corr", "corridor"):
+    if cmd in ("max", "corr"):
+        if cmd == "corr" and rest[:1] == ["max"]:
+            rest = rest[1:]
+        if len(rest) != 1:
+            raise CommandError("Формат: max <кВт>")
+        value = _num(rest[0], "кВт")
+        _call(api, "settings", {"section": "rules", "values": {"max_kw": value}})
+        return [f"Верхняя граница = {value:.2f} кВт (сохранено в server.yaml)"]
+
+    if cmd == "set":
         if not rest:
-            raise CommandError("Формат: corr min|max <кВт> [мин]  |  corr reset [min|max]")
-        sub = rest[0].lower()
-        if sub == "reset":
-            bound = rest[1].lower() if len(rest) > 1 else "all"
-            if bound not in ("min", "max", "all"):
-                raise CommandError("Формат: corr reset [min|max]")
-            _call(api, "corridor", {"bound": bound, "value": None})
-            what = {"min": "нижняя граница", "max": "верхняя граница", "all": "обе границы"}[bound]
-            return [f"Коридор: {what} — из сценария"]
-        if sub not in ("min", "max") or len(rest) < 2:
-            raise CommandError("Формат: corr min|max <кВт> [мин]")
-        value = _num(rest[1], "кВт")
-        minutes = _num(rest[2], "минуты") if len(rest) > 2 else None
-        _call(api, "corridor", {"bound": sub, "value": value, "minutes": minutes or None})
-        return [f"Коридор {sub} = {value:.2f} кВт" + (f" на {minutes:g} мин" if minutes else " до reset")]
+            return ["Правила:"] + _fields(settings["fields"]["rules"], settings["rules"])
+        values = _kv(rest)
+        _call(api, "settings", {"section": "rules", "values": values})
+        return ["Правила: " + ", ".join(f"{k}={v}" for k, v in values.items()) + " (сохранено в server.yaml)"]
 
     if cmd in ("bat", "battery"):
-        if rest and rest[0].lower() == "fields":
-            return ["Изменяемые поля:"] + [f"  {k:<22} {d}" for k, d in BATTERY_FIELDS]
-        if len(rest) < 2:
-            raise CommandError("Формат: bat <ID> поле=значение ...   (bat fields — список полей)")
-        bid = rest[0].upper()
-        fields = {}
-        for kv in rest[1:]:
-            k, sep, v = kv.partition("=")
-            if not sep:
-                raise CommandError(f"'{kv}': ожидается поле=значение")
-            k = k.strip().lower()
-            fields[k] = v.strip() if k in ("name", "description") else v.strip().replace(",", ".")
-        _call(api, "battery", {"id": bid, "fields": fields})
-        return [f"АКБ {bid}: " + ", ".join(f"{k}={v}" for k, v in fields.items())]
+        if not rest or rest[0].lower() == "fields":
+            return [f"АКБ «{settings['battery']['name']}»:"] + _fields(settings["fields"]["battery"],
+                                                                       settings["battery"]) + \
+                   ["  состояние: soc=<%> или charge_kwh=<кВт·ч>; bat off [мин] / bat on"]
+        sub = rest[0].lower()
+        if sub in ("on", "off"):
+            body = {"connect": sub == "on"}
+            if sub == "off" and len(rest) > 1:
+                body["minutes"] = _num(rest[1], "минуты")
+            _call(api, "battery", body)
+            if sub == "on":
+                return ["АКБ подключён"]
+            return [f"АКБ отключён" + (f" на {body['minutes']:g} мин" if body.get("minutes") else " до bat on")]
+        values = _kv(rest)
+        st = {k: _num(values.pop(k), k) for k in BATTERY_STATE if k in values}
+        if values:
+            _call(api, "settings", {"section": "battery", "values": values})
+        if st:
+            _call(api, "battery", st)
+        return ["АКБ: " + ", ".join(f"{k}={v}" for k, v in {**values, **st}.items())
+                + (" (параметры сохранены в server.yaml)" if values else "")]
 
-    if cmd == "active":
-        if len(rest) != 1:
-            raise CommandError("Формат: active <ID>")
-        _call(api, "battery/active", {"id": rest[0].upper()})
-        return [f"Активный АКБ: {rest[0].upper()}"]
-
-    if cmd in ("crisis", "phase"):
-        if len(rest) != 1 or rest[0].lower() not in ("pause", "resume", "cancel"):
-            raise CommandError(f"Формат: {cmd} pause|resume|cancel")
-        _call(api, cmd, {"action": rest[0].lower()})
-        return [CRISIS_DONE[cmd][rest[0].lower()]]
+    if cmd == "crisis":
+        if len(rest) != 1 or rest[0].lower() not in CRISIS_DONE:
+            raise CommandError("Формат: crisis pause|resume|cancel")
+        _call(api, "crisis", {"action": rest[0].lower()})
+        return [CRISIS_DONE[rest[0].lower()]]
 
     if cmd == "solar":
         if len(rest) != 1:
@@ -243,9 +251,9 @@ def execute(text: str, api: AdminClient, state: dict | None) -> list[str]:
         return [f"Отправлено в терминал [{level}]"]
 
     if cmd == "time":
-        if len(rest) != 1:
-            raise CommandError("Формат: time ЧЧ:ММ")
-        _call(api, "time", {"time": rest[0]})
-        return [f"Игровое время → {rest[0]}"]
+        if len(rest) not in (1, 2):
+            raise CommandError("Формат: time <сол> ЧЧ:ММ")
+        _call(api, "time", {"time": " ".join(rest)})
+        return [f"Время купола → {' '.join(rest)}"]
 
     raise CommandError(f"Неизвестная команда '{cmd}'. Справка — F1.")

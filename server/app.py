@@ -2,25 +2,24 @@
 HTTP API и раздача веб-интерфейса участников.
 
 GET  /api/state              — текущее состояние (опрос раз в 1–2 с)
-GET  /api/history            — история дня (генерация, потребление, коридор, линии, АКБ)
-GET  /api/forecast           — прогноз солнечной генерации на игровой день
+GET  /api/history?since=t    — история игры (генерация, потребление, границы, линии, АКБ) + пропуски связи
+GET  /api/forecast           — прогноз солнечной генерации на всю игру
 GET  /api/terminal?after=N   — сообщения терминала с номером > N
 POST /api/line               — {"line": 3, "on": true}
-POST /api/battery/active     — {"id": "B"}
+POST /api/priority           — {"line": 3, "priority": 5}   (линия, у которой был 5, получает старый приоритет 3-й)
 
 Админка (заголовок X-Admin-Token, клиент — python -m admin):
-GET  /api/admin/state                 — состояние + переопределения организатора
+GET  /api/admin/state                 — состояние + настройки и переопределения организатора
 POST /api/admin/line                  — {"line": 3, "action": "on|off|lock|unlock", "minutes": 10, "reason": "..."}
 POST /api/admin/line/name             — {"line": 3, "consumer": "BIO-L"}   (null — снять привязку)
 POST /api/admin/line/identify         — {"line": 3}   помигать линией
-POST /api/admin/corridor              — {"bound": "min|max|all", "value": 4.5 | null, "minutes": 15}
-POST /api/admin/battery               — {"id": "A", "fields": {"charge_kwh": 10, "status": "ok"}}
-POST /api/admin/battery/active        — {"id": "B"}
-POST /api/admin/crisis                — {"action": "pause|resume|cancel"}   нарушения коридора/дефицит
-POST /api/admin/phase                 — {"action": "pause|resume|cancel"}   текущая фаза сценария
-POST /api/admin/solar                 — {"factor": 1.2}   0.0–2.0, умножается на коэффициент фазы
+POST /api/admin/line/priority         — {"line": 3, "priority": 5}
+POST /api/admin/settings              — {"section": "battery|rules", "values": {"max_kw": 10}}  (+ запись в server.yaml)
+POST /api/admin/battery               — {"charge_kwh": 10} | {"soc": 50} | {"connect": false, "minutes": 15}
+POST /api/admin/crisis                — {"action": "pause|resume|cancel"}
+POST /api/admin/solar                 — {"factor": 1.2}   0.0–2.0
 POST /api/admin/message               — {"text": "...", "level": "INFO|WARN|CRIT|OK"}
-POST /api/admin/time                  — {"time": "13:30"}  перемотка, только clock.mode = sim
+POST /api/admin/time                  — {"time": "2 13:30"}  перемотка (сол ЧЧ:ММ), только clock.mode = sim
 
 Телеметрия для ЦУП (Вт, А, А·ч) — см. server/telemetry.py и ISG_Energy_telemetry.md.
 """
@@ -41,8 +40,9 @@ class LineCmd(BaseModel):
     on: bool
 
 
-class BatteryCmd(BaseModel):
-    id: str
+class PriorityCmd(BaseModel):
+    line: int
+    priority: int
 
 
 class AdminMsg(BaseModel):
@@ -70,15 +70,16 @@ class AdminLineRef(BaseModel):
     line: int
 
 
-class AdminCorridor(BaseModel):
-    bound: str
-    value: float | None = None
-    minutes: float | None = None
+class AdminSettings(BaseModel):
+    section: str
+    values: dict
 
 
 class AdminBattery(BaseModel):
-    id: str
-    fields: dict
+    charge_kwh: float | None = None
+    soc: float | None = None
+    connect: bool | None = None
+    minutes: float | None = None
 
 
 class AdminAction(BaseModel):
@@ -101,6 +102,14 @@ def create_app(engine: Engine, static_dir: str, admin_token: str | None,
     app = FastAPI(title="Dome power system")
     telemetry.install(app, engine, telemetry_cfg)
 
+    @app.middleware("http")
+    async def no_stale_cache(request, call_next):
+        # браузер обязан перепроверять файлы панели (по ETag), иначе после обновления сервера
+        # может остаться старый energy.js при новом index.html
+        resp = await call_next(request)
+        resp.headers.setdefault("Cache-Control", "no-cache")
+        return resp
+
     def admin(x_admin_token: str | None = Header(None)):
         if not admin_token or x_admin_token != admin_token:
             raise HTTPException(403, "Нет доступа: неверный admin_token")
@@ -111,9 +120,9 @@ def create_app(engine: Engine, static_dir: str, admin_token: str | None,
         return engine.snapshot()
 
     @app.get("/api/history")
-    def history():
-        return {"samples": engine.history_view(), "lines": [engine.name(l) for l in engine.lines],
-                "batteries": list(engine.batteries)}
+    def history(since: float | None = None):
+        return {"samples": engine.history_view(since), "gaps": engine.gaps(), "gap_min": engine.gap_min(),
+                "lines": [engine.name(l) for l in engine.lines]}
 
     @app.get("/api/forecast")
     def forecast():
@@ -127,9 +136,9 @@ def create_app(engine: Engine, static_dir: str, admin_token: str | None,
     def line(cmd: LineCmd):
         return _result(engine.set_line(cmd.line, cmd.on))
 
-    @app.post("/api/battery/active")
-    def battery(cmd: BatteryCmd):
-        return _result(engine.set_active_battery(cmd.id))
+    @app.post("/api/priority")
+    def priority(cmd: PriorityCmd):
+        return _result(engine.set_priority(cmd.line, cmd.priority))
 
     # ------------------------------------------------------------------ админка
     @app.get("/api/admin/state", dependencies=[Depends(admin)])
@@ -149,25 +158,21 @@ def create_app(engine: Engine, static_dir: str, admin_token: str | None,
     def admin_identify(m: AdminLineRef):
         return _result(engine.identify(m.line))
 
-    @app.post("/api/admin/corridor", dependencies=[Depends(admin)])
-    def admin_corridor(m: AdminCorridor):
-        return _result(engine.admin_corridor(m.bound, m.value, m.minutes))
+    @app.post("/api/admin/line/priority", dependencies=[Depends(admin)])
+    def admin_priority(m: PriorityCmd):
+        return _result(engine.set_priority(m.line, m.priority, who="ADMIN PRIORITY"))
+
+    @app.post("/api/admin/settings", dependencies=[Depends(admin)])
+    def admin_settings(m: AdminSettings):
+        return _result(engine.admin_settings(m.section, m.values))
 
     @app.post("/api/admin/battery", dependencies=[Depends(admin)])
     def admin_battery(m: AdminBattery):
-        return _result(engine.admin_battery(m.id, m.fields))
-
-    @app.post("/api/admin/battery/active", dependencies=[Depends(admin)])
-    def admin_battery_active(m: BatteryCmd):
-        return _result(engine.set_active_battery(m.id, force=True))
+        return _result(engine.admin_battery(m.charge_kwh, m.soc, m.connect, m.minutes))
 
     @app.post("/api/admin/crisis", dependencies=[Depends(admin)])
     def admin_crisis(m: AdminAction):
         return _result(engine.admin_crisis(m.action))
-
-    @app.post("/api/admin/phase", dependencies=[Depends(admin)])
-    def admin_phase(m: AdminAction):
-        return _result(engine.admin_phase(m.action))
 
     @app.post("/api/admin/solar", dependencies=[Depends(admin)])
     def admin_solar(m: AdminSolar):
@@ -182,11 +187,7 @@ def create_app(engine: Engine, static_dir: str, admin_token: str | None,
 
     @app.post("/api/admin/time", dependencies=[Depends(admin)])
     def admin_time(m: AdminTime):
-        try:
-            engine.clock.set_time(m.time)
-        except (RuntimeError, ValueError) as e:
-            raise HTTPException(409, str(e))
-        return {"ok": True}
+        return _result(engine.admin_time(m.time))
 
     @app.get("/")
     def index():

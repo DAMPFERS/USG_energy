@@ -5,26 +5,47 @@ host: 0.0.0.0
 port: 8000
 admin_token: "change-me"          # для /api/admin/* (заголовок X-Admin-Token)
 
-scenario: config/scenarios/day1.yaml   # сценарий текущего игрового дня
+scenario: config/scenarios/mission.yaml   # сценарий игры: начало, длительность, прогноз, сообщения
 logs_dir: logs
 static_dir: static
 
 # Часы игры:
-#   mode: real — реальное время (боевой режим)
-#   mode: sim  — отладка: старт с start, ускорение speed (20 = час за 3 минуты)
+#   mode: real — реальное время (боевой режим); время купола = системное время машины
+#   mode: sim  — отладка: старт с start (марсианское «сол ЧЧ:ММ», по умолчанию — за 2 мин до начала),
+#                ускорение speed (20 = час за 3 минуты). Точка отсчёта хранится в logs/clock_<сценарий>.json,
+#                чтобы после перезапуска время продолжилось; новый start подхватится после --reset.
 clock:
   mode: sim
-  start: "07:58"
+  start: "1 11:28"
   speed: 20
 
-# Телеметрия для ЦУП (описание протокола — TELEMETRY.md):
+# Аккумулятор купола (один). Меняется из админки (bat ...), изменения записываются сюда.
+battery:
+  name: "Dome battery"
+  capacity_kwh: 40          # ёмкость, кВт·ч
+  initial_kwh: 25           # заряд на старте игры, кВт·ч
+  max_charge_kw: 5          # макс. мощность заряда: избыток генерации выше неё — нарушение нижней границы
+  max_discharge_kw: 6       # макс. мощность разряда
+
+# Правила игры. Меняются из админки (max ..., set ...), изменения записываются сюда.
+# Время — игровое (в режиме sim идёт быстрее).
+rules:
+  max_kw: 9                 # верхняя граница коридора потребления, кВт
+  overload_grace_min: 5     # потребление выше max_kw: через сколько минут блэкаут (все линии выкл, без блокировки)
+  surplus_grace_min: 5      # генерация − потребление > max_charge_kw: через сколько минут отключится АКБ
+  battery_off_min: 15       # на сколько минут отключается АКБ
+  deficit_grace_s: 10       # потребление > генерация + разряд АКБ: через сколько секунд отключать линии
+  deficit_lock_min: 15      # на сколько минут блокируются линии, отключённые при дефиците
+  clear_s: 10               # сколько секунд нарушения не должно быть, чтобы предупреждение снялось
+
+# Телеметрия для ЦУП (описание протокола — ISG_Energy_telemetry.md):
 #   GET /api/telemetry, /api/telemetry/meta, /api/telemetry/forecast, /api/telemetry/history
 #   WS  /ws/telemetry
 telemetry:
   token: ""                 # пусто — без авторизации; иначе X-Telemetry-Token или ?token=
   push_interval_s: 2.0      # период отправки среза по WebSocket (реальные секунды)
   battery_voltage_v: 24     # номинальное напряжение АКБ для пересчёта в А и А·ч (в сценарии можно задать voltage_v у АКБ)
-  forecast_step_min: 15     # шаг прогноза W(t) по умолчанию
+  forecast_step_min: 5      # шаг прогноза W(t) по умолчанию
   cors_origins: ["*"]       # с каких веб-страниц разрешены запросы GET (для панели ЦУП в браузере)
 
 relay_poll_s: 2.0     # период опроса реле
@@ -34,6 +55,7 @@ solar:
   source: sim         # сейчас — пересчёт прогноза с разбросом; позже — реальные панели
   interval_s: 2.0
   noise: 1.0          # множитель к sigma из прогноза (0 — генерация точно по прогнозу)
+                      # масштаб генерации на лету — команда solar в админке
   correlation: 0.97   # 0..1, чем ближе к 1, тем плавнее «облака»
 
 # Потребители купола (ключ — для команд админки и сценария, name — что видят участники).
@@ -89,6 +111,7 @@ lines:
 #   - {id: 10, name: "Линия 10",  driver: tuya, scale: 1, tuya: {device_id: "bf0826a3d2a603fefex5bq", local_key: "3/>f'g.lYrs}rFDn", ip: "192.168.8.82", version: 3.5}}
 #   - {id: 11, name: "Линия 11",  driver: tuya, scale: 1, tuya: {device_id: "bf782d238fb2624a39ofeh", local_key: "SJ&>]yGg!`h.={e|", ip: "192.168.8.83", version: 3.5}}
 #   - {id: 12, name: "Линия 12", driver: tuya, scale: 1, tuya: {device_id: "bf300250be9bf94b97w0by", local_key: "nCqbR+r@*kJ5H?!4", ip: "192.168.8.84", version: 3.5}}
+#   - {id: 13, name: "Линия 13", driver: tuya, scale: 1, tuya: {device_id: "bf300250be44f94b97w0by", local_key: "nCrrerr@*kJ5H?!4", ip: "192.168.8.126", version: 3.5}}
 
 # 2й щиток
 # lines:
@@ -104,3 +127,4 @@ lines:
 #   - {id: 10, name: "Линия 10",  driver: tuya, scale: 1, tuya: {device_id: "bff09de7b4235d9b06lzzd", local_key: "VAL0lcU~6*(`ut1Y", ip: "192.168.8.98", version: 3.5}}
 #   - {id: 11, name: "Линия 11",  driver: tuya, scale: 1, tuya: {device_id: "bf8b5c5adc297beb5bw8bz", local_key: "ods<vOr-G3j<9t2S", ip: "192.168.8.99", version: 3.5}}
 #   - {id: 12, name: "Линия 12", driver: tuya, scale: 1, tuya: {device_id: "bf651a3c2067fa7121uxxy", local_key: "Rzuf{ha)@DGshq6:", ip: "192.168.8.100", version: 3.5}}
+#   - {id: 13, name: "Линия 13", driver: tuya, scale: 1, tuya: {device_id: "bf300250be44f94b976767", local_key: "nCrrerr@*kJ5H?!7", ip: "192.168.8.127", version: 3.5}} 

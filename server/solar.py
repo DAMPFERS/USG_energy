@@ -1,10 +1,11 @@
 """
 Солнечная генерация и прогноз.
 
-Forecast — прогноз из CSV (time,forecast_kw,sigma_kw), линейная интерполяция.
+Forecast — прогноз из CSV (sol,time,forecast_kw,sigma_kw; время марсианское, шаг 5 мин),
+линейная интерполяция по t (минуты от Сола 1 00:00).
 SimSolarSource — источник «фактической» генерации в отдельном потоке:
     факт = прогноз(t) * factor + коррелированный шум ~ sigma(t)
-    factor задаёт сценарий (например, песчаная буря = 0.3).
+    factor задаёт организатор (команда solar).
 
 Чтобы подключить реальные панели, реализуйте класс с теми же методами
 (start, stop, power_kw, set_factor) и укажите его в server.yaml (solar.source).
@@ -15,34 +16,38 @@ import math
 import random
 import threading
 from bisect import bisect_right
+from typing import Callable
 
-from .clock import GameClock, hhmm_to_min, dt_to_min
+from .clock import hhmm_to_min
 
 log = logging.getLogger("solar")
 
 
 class Forecast:
-    def __init__(self, path: str):
-        self.t: list[float] = []      # минуты от полуночи
+    def __init__(self, path: str, sol_min: float):
+        self.t: list[float] = []      # минуты от Сола 1 00:00
         self.mean: list[float] = []
         self.sigma: list[float] = []
         with open(path, encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
-                self.t.append(hhmm_to_min(row["time"]))
+                sol = int(row.get("sol") or 1)
+                self.t.append((sol - 1) * sol_min + hhmm_to_min(row["time"]))
                 self.mean.append(float(row["forecast_kw"]))
                 self.sigma.append(float(row.get("sigma_kw") or 0))
         if not self.t:
             raise ValueError(f"Пустой прогноз: {path}")
+        order = sorted(range(len(self.t)), key=self.t.__getitem__)
+        self.t, self.mean, self.sigma = ([v[i] for i in order] for v in (self.t, self.mean, self.sigma))
         log.info("Прогноз загружен: %s (%d точек)", path, len(self.t))
 
-    def at(self, minute: float) -> tuple[float, float]:
-        t = self.t
-        if minute <= t[0]:
+    def at(self, t: float) -> tuple[float, float]:
+        ts = self.t
+        if t <= ts[0]:
             return self.mean[0], self.sigma[0]
-        if minute >= t[-1]:
+        if t >= ts[-1]:
             return self.mean[-1], self.sigma[-1]
-        i = bisect_right(t, minute) - 1
-        k = (minute - t[i]) / (t[i + 1] - t[i])
+        i = bisect_right(ts, t) - 1
+        k = (t - ts[i]) / (ts[i + 1] - ts[i])
         return (self.mean[i] + k * (self.mean[i + 1] - self.mean[i]),
                 self.sigma[i] + k * (self.sigma[i + 1] - self.sigma[i]))
 
@@ -53,10 +58,10 @@ class Forecast:
 
 
 class SimSolarSource:
-    def __init__(self, forecast: Forecast, clock: GameClock, interval: float = 1.0,
+    def __init__(self, forecast: Forecast, now_t: Callable[[], float], interval: float = 1.0,
                  noise: float = 1.0, correlation: float = 0.97):
         self.forecast = forecast
-        self.clock = clock
+        self.now_t = now_t              # текущее время купола t
         self.interval = interval
         self.noise = noise              # множитель к sigma из прогноза
         self.correlation = correlation  # «вязкость» шума: облака не прыгают каждую секунду
@@ -85,7 +90,7 @@ class SimSolarSource:
     def _loop(self):
         a = self.correlation
         while not self._stop.is_set():
-            mean, sd = self.forecast.at(dt_to_min(self.clock.now()))
+            mean, sd = self.forecast.at(self.now_t())
             # AR(1) со стационарной дисперсией 1
             self._z = a * self._z + math.sqrt(1 - a * a) * random.gauss(0, 1)
             with self._lock:

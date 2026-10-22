@@ -12,3 +12,6 @@ smart_rele/tuya-raw.json
 
 # выгрузка запылённости для георазведки (python -m server.export_dust)
 dust_export.csv
+
+# графики по исходным данным (python data/plot_csv.py)
+data/plots/

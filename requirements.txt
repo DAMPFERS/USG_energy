@@ -4,3 +4,4 @@ websockets>=12.0
 pyyaml>=6.0
 tinytuya>=1.13
 textual>=8.0       # консоль организатора (python -m admin)
+matplotlib>=3.8    # графики по CSV (python data/plot_csv.py)

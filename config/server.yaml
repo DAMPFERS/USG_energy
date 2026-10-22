@@ -3,7 +3,7 @@
 
 host: 0.0.0.0
 port: 8000
-admin_token: "change-me"          # для /api/admin/* (заголовок X-Admin-Token)
+admin_token: "root"          # для /api/admin/* (заголовок X-Admin-Token)
 
 scenario: config/scenarios/mission.yaml   # сценарий игры: начало, длительность, прогноз, сообщения
 logs_dir: logs
@@ -30,9 +30,9 @@ battery:
 # Правила игры. Меняются из админки (max ..., set ...), изменения записываются сюда.
 # Время — игровое (в режиме sim идёт быстрее).
 rules:
-  max_kw: 9                 # верхняя граница коридора потребления, кВт
-  overload_grace_min: 5     # потребление выше max_kw: через сколько минут блэкаут (все линии выкл, без блокировки)
-  surplus_grace_min: 5      # генерация − потребление > max_charge_kw: через сколько минут отключится АКБ
+  max_kw: 900                 # верхняя граница коридора потребления, кВт
+  overload_grace_min: 50     # потребление выше max_kw: через сколько минут блэкаут (все линии выкл, без блокировки)
+  surplus_grace_min: 50      # генерация − потребление > max_charge_kw: через сколько минут отключится АКБ
   battery_off_min: 15       # на сколько минут отключается АКБ
   deficit_grace_s: 10       # потребление > генерация + разряд АКБ: через сколько секунд отключать линии
   deficit_lock_min: 15      # на сколько минут блокируются линии, отключённые при дефиците
@@ -82,37 +82,37 @@ line_map: config/line_map.yaml
 # scale: игровые кВт = измеренные реле кВт * scale (лампа 60 Вт при scale 20 = 1.2 кВт купола).
 # Пример реального реле:
 #   - {id: 1, driver: tuya, scale: 1, tuya: {device_id: "...", local_key: "...", ip: "192.168.8.89", version: 3.5}}
-lines:
-  - {id: 1,  driver: sim, sim: {base_kw: 1.0, variability: 0.08}}
-  - {id: 2,  driver: sim, sim: {base_kw: 0.9, variability: 0.05}}
-  - {id: 3,  driver: sim, sim: {base_kw: 1.6, variability: 0.15}}
-  - {id: 4,  driver: sim, sim: {base_kw: 1.2, variability: 0.10}}
-  - {id: 5,  driver: sim, sim: {base_kw: 1.1, variability: 0.06}}
-  - {id: 6,  driver: sim, sim: {base_kw: 0.8, variability: 0.05}}
-  - {id: 7,  driver: sim, sim: {base_kw: 1.3, variability: 0.12}}
-  - {id: 8,  driver: sim, sim: {base_kw: 0.7, variability: 0.05}}
-  - {id: 9,  driver: sim, sim: {base_kw: 0.4, variability: 0.02}}
-  - {id: 10, driver: sim, sim: {base_kw: 0.3, variability: 0.02}}
-  - {id: 11, driver: sim, sim: {base_kw: 0.5, variability: 0.03}}
-  - {id: 12, driver: sim, sim: {base_kw: 0.4, variability: 0.02}}
-  - {id: 13, driver: sim, sim: {base_kw: 0.3, variability: 0.02}}
+# lines:
+#   - {id: 1,  driver: sim, sim: {base_kw: 1.0, variability: 0.08}}
+#   - {id: 2,  driver: sim, sim: {base_kw: 0.9, variability: 0.05}}
+#   - {id: 3,  driver: sim, sim: {base_kw: 1.6, variability: 0.15}}
+#   - {id: 4,  driver: sim, sim: {base_kw: 1.2, variability: 0.10}}
+#   - {id: 5,  driver: sim, sim: {base_kw: 1.1, variability: 0.06}}
+#   - {id: 6,  driver: sim, sim: {base_kw: 0.8, variability: 0.05}}
+#   - {id: 7,  driver: sim, sim: {base_kw: 1.3, variability: 0.12}}
+#   - {id: 8,  driver: sim, sim: {base_kw: 0.7, variability: 0.05}}
+#   - {id: 9,  driver: sim, sim: {base_kw: 0.4, variability: 0.02}}
+#   - {id: 10, driver: sim, sim: {base_kw: 0.3, variability: 0.02}}
+#   - {id: 11, driver: sim, sim: {base_kw: 0.5, variability: 0.03}}
+#   - {id: 12, driver: sim, sim: {base_kw: 0.4, variability: 0.02}}
+#   - {id: 13, driver: sim, sim: {base_kw: 0.3, variability: 0.02}}
 
 # Реальные реле (для перехода на железо — перенести нужные строки в lines и указать id 1–13)
 # 1й щиток
-# lines:
-#   - {id: 1,  name: "Линия 1",  driver: tuya, scale: 1, tuya: {device_id: "bfa0b22d189059bb59aymo", local_key: "&K`}2Y)fJn;EPS|J", ip: "192.168.8.73", version: 3.5}}
-#   - {id: 2,  name: "Линия 2", driver: tuya, scale: 1, tuya: {device_id: "bf3b2511937c4e33298lkd", local_key: "e)H#3XIe[.1Na[t'", ip: "192.168.8.86", version: 3.5}}
-#   - {id: 3,  name: "Линия 3", driver: tuya, scale: 1, tuya: {device_id: "bf1e390576573dac1acgmn", local_key: "Akyh;z_rO3t=]2=C", ip: "192.168.8.75", version: 3.5}}
-#   - {id: 4,  name: "Линия 4",  driver: tuya, scale: 1, tuya: {device_id: "bfe270aa8fcdd6ad16zhqz", local_key: "+K{E'#RGyx*qh=[h", ip: "192.168.8.76", version: 3.5}}
-#   - {id: 5,  name: "Линия 5",  driver: tuya, scale: 1, tuya: {device_id: "bfd48cd1e0ac0f0968nhxj", local_key: "<Pu8$vB?$P`3@w48", ip: "192.168.8.77", version: 3.5}}
-#   - {id: 6,  name: "Линия 6",  driver: tuya, scale: 1, tuya: {device_id: "bfaa3385b67a0cdbe0wiwo", local_key: "[<XAh_tU<L)*QF0A", ip: "192.168.8.78", version: 3.5}}
-#   - {id: 7,  name: "Линия 7",  driver: tuya, scale: 1, tuya: {device_id: "bf0dd8e6cb9485b047pgvf", local_key: "&h/?5-;)YC|.0SUU", ip: "192.168.8.79", version: 3.5}}
-#   - {id: 8,  name: "Линия 8",  driver: tuya, scale: 1, tuya: {device_id: "bf7e1560c925f2db088g2a", local_key: "Cs<o][5TqhQ+#@_l", ip: "192.168.8.88", version: 3.5}}
-#   - {id: 9,  name: "Линия 9",  driver: tuya, scale: 1, tuya: {device_id: "bf0a1968c335a2e2c6r30p", local_key: "uTb|kw;ZM`&esGnr", ip: "192.168.8.81", version: 3.5}}
-#   - {id: 10, name: "Линия 10",  driver: tuya, scale: 1, tuya: {device_id: "bf0826a3d2a603fefex5bq", local_key: "3/>f'g.lYrs}rFDn", ip: "192.168.8.82", version: 3.5}}
-#   - {id: 11, name: "Линия 11",  driver: tuya, scale: 1, tuya: {device_id: "bf782d238fb2624a39ofeh", local_key: "SJ&>]yGg!`h.={e|", ip: "192.168.8.83", version: 3.5}}
-#   - {id: 12, name: "Линия 12", driver: tuya, scale: 1, tuya: {device_id: "bf300250be9bf94b97w0by", local_key: "nCqbR+r@*kJ5H?!4", ip: "192.168.8.84", version: 3.5}}
-#   - {id: 13, name: "Линия 13", driver: tuya, scale: 1, tuya: {device_id: "bf300250be44f94b97w0by", local_key: "nCrrerr@*kJ5H?!4", ip: "192.168.8.126", version: 3.5}}
+lines:
+  - {id: 1,  driver: tuya, scale: 1, tuya: {device_id: "bf9d41e93a7fbcf8eazzxf", local_key: "28WvqvS1k6ukj7S2", ip: "192.168.101.130", version: 3.5}}
+  - {id: 2,  driver: tuya, scale: 1, tuya: {device_id: "bf651a3c2067fa7121uxxy", local_key: "?k|gh~6PS~d&^}1e", ip: "192.168.101.114", version: 3.5}}
+  - {id: 3,  driver: tuya, scale: 1, tuya: {device_id: "bf8b5c5adc297beb5bw8bz", local_key: "_'ZJtFb0b+ly0X<c", ip: "192.168.101.117", version: 3.5}}
+  - {id: 4,  driver: tuya, scale: 1, tuya: {device_id: "bff09de7b4235d9b06lzzd", local_key: "qmcW6(@ilUO&0VZf", ip: "192.168.101.161", version: 3.5}}
+  - {id: 5,  driver: tuya, scale: 1, tuya: {device_id: "bf69f018907ddd23d1pnxs", local_key: "Qi42Sv]CcdK|#1C@", ip: "192.168.101.102", version: 3.5}}
+  - {id: 6,  driver: tuya, scale: 1, tuya: {device_id: "bf0e96bbdf3bfefc8e5ggn", local_key: "|0j0L!LEu/t(;jK3", ip: "192.168.101.129", version: 3.5}}
+  - {id: 7,  driver: tuya, scale: 1, tuya: {device_id: "bf652ea4f5e08a641e0kwm", local_key: "S'_xd{!glrG11_Q}", ip: "192.168.101.124", version: 3.5}}
+  - {id: 8,  driver: tuya, scale: 1, tuya: {device_id: "bff6a69a33633f860cpy5p", local_key: "XY83XJGkUkTo:.:@", ip: "192.168.101.122", version: 3.5}}
+  - {id: 9,  driver: tuya, scale: 1, tuya: {device_id: "bf8655068eaeb8faf7qngb", local_key: "Q#I-|DRAv@7j3O(G", ip: "192.168.101.100", version: 3.5}}
+  - {id: 10, driver: tuya, scale: 1, tuya: {device_id: "bff42e47babbedfe78bzux", local_key: "1e(_a<SZ$c;USO+}", ip: "192.168.101.169", version: 3.5}}
+  - {id: 11, driver: tuya, scale: 1, tuya: {device_id: "bfc4e6a8cdd9c2a6dbs8g2", local_key: "QQvccJT3o0/}&VTk", ip: "192.168.101.142", version: 3.5}}
+  - {id: 12, driver: tuya, scale: 1, tuya: {device_id: "bf9f7a554c248407d3svoj", local_key: "oox@}Y>uq>4TZguu", ip: "192.168.101.138", version: 3.5}}
+  - {id: 13, driver: tuya, scale: 1, tuya: {device_id: "bfa7acde5a42e297a5htnd", local_key: ">W{t7T9J;('?cbY9", ip: "192.168.101.157", version: 3.5}}
 
 # 2й щиток
 # lines:

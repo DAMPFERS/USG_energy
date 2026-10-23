@@ -5,6 +5,7 @@
     python -m server --config my.yaml
     python -m server --scenario config/scenarios/mission.yaml
     python -m server --reset                  # начать игру заново (стереть логи/состояние этого сценария)
+    python -m server --demo                   # демо: 12 ч прогноза с момента запуска (config/scenarios/demo.yaml)
 """
 import argparse
 import logging
@@ -25,6 +26,7 @@ from .solar import DustSeries, Forecast, SimSolarSource
 from .terminal import Terminal
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEMO_SCENARIO = "config/scenarios/demo.yaml"
 
 
 def p(path):
@@ -36,6 +38,7 @@ def main():
     ap.add_argument("--config", default="config/server.yaml")
     ap.add_argument("--scenario", help="переопределить сценарий из конфига")
     ap.add_argument("--reset", action="store_true", help="стереть состояние, историю и терминал этого сценария")
+    ap.add_argument("--demo", action="store_true", help=f"демо-версия: сценарий {DEMO_SCENARIO}, старт при запуске")
     args = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -47,13 +50,13 @@ def main():
     with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    sc = load_scenario(p(args.scenario or cfg["scenario"]))
+    sc = load_scenario(p(args.scenario or (DEMO_SCENARIO if args.demo else cfg["scenario"])))
     logs_dir = p(cfg.get("logs_dir", "logs"))
     os.makedirs(logs_dir, exist_ok=True)
     logging.getLogger().addHandler(logging.FileHandler(os.path.join(logs_dir, "server.log"), encoding="utf-8"))
 
     clock_path = os.path.join(logs_dir, f"clock_{sc.id}.json")
-    if args.reset:
+    if args.reset or sc.live_start:     # демо (start: now) всегда начинается заново
         for name in (f"state_{sc.id}.json", f"telemetry_{sc.id}.csv", f"terminal_{sc.id}.log",
                      f"actions_{sc.id}.log", f"clock_{sc.id}.json"):
             fp = os.path.join(logs_dir, name)
@@ -61,8 +64,11 @@ def main():
                 os.remove(fp)
         logging.info("Игра %s сброшена", sc.id)
 
-    ck = cfg.get("clock", {}) or {}
-    sim_start = sc.mars.dt(sc.mars.parse(ck["start"]) if ck.get("start") else sc.start_t - 2)
+    ck = {**(cfg.get("clock") or {}), **sc.clock}
+    if sc.live_start:
+        sim_start = sc.mars.dt(sc.start_t)
+    else:
+        sim_start = sc.mars.dt(sc.mars.parse(ck["start"]) if ck.get("start") else sc.start_t - 2)
     clock = GameClock(ck.get("mode", "real"), ck.get("speed", 1.0), sim_start, clock_path)
 
     line_cfgs = build_lines(cfg["lines"])

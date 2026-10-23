@@ -1,0 +1,55 @@
+# ============================================================================
+#  Демо-версия для показа работы системы: python -m server --demo
+#
+#  Игра начинается сразу в момент запуска сервера и длится 12 часов — это окно
+#  прогноза основного кейса (mission.yaml): Сол 2, 06:00–18:00 — восход, пик
+#  генерации, пылевая буря 13:00–16:30 и вечерний спад.
+#  Каждый запуск — с чистого листа (история, терминал и состояние демо стираются).
+#  Логи демо — logs/*_demo.*, основная игра не затрагивается.
+#
+#  Формат — как у mission.yaml. Другое окно прогноза — поменяйте start_mars.
+# ============================================================================
+
+name: "ISG 2026 — Mars dome (demo)"
+start: now                    # старт в момент запуска сервера
+start_mars: "2 06:00"         # с какого момента прогноза начинается демо
+duration_h: 12
+forecast_csv: ../../data/forecast.csv
+dust_csv: ../../data/dust.csv
+history_step_s: 30
+
+# Часы демо (переопределяют clock из server.yaml). real — 12 реальных часов;
+# для быстрого показа: mode: sim, speed: 20 — 12 часов пройдут за 36 минут.
+clock:
+  mode: real
+
+messages:
+  - at: "2 06:00"
+    level: INFO
+    text: |
+      Demo session. 12 hours of the dome's day: sunrise, solar peak, a dust storm and the evening.
+      Keep consumption within the limits and set line priorities.
+
+  - at: "2 06:10"
+    level: OK
+    text: "Sunrise. Generation is recovering."
+
+  - at: "2 12:00"
+    level: INFO
+    text: "Solar output is at its daily peak. A good time to charge the battery."
+
+  - at: "2 13:00"
+    level: CRIT
+    text: "DUST STORM. Solar panels are producing no power. Reduce the load to the minimum."
+
+  - at: "2 16:30"
+    level: WARN
+    text: "The storm is subsiding. Generation is recovering."
+
+  - at: "2 17:00"
+    level: WARN
+    text: "Evening. Generation is falling — prepare the dome for the night."
+
+  - at: "2 18:00"
+    level: OK
+    text: "Demo complete. Thank you!"

@@ -3,6 +3,9 @@
 
 Сценарий — это одна большая игра: начало (земное время), длительность, прогноз солнца,
 запылённость атмосферы и сообщения терминала по расписанию. Время сообщений — марсианское («сол ЧЧ:ММ»).
+
+start: now — демо-режим: игра начинается в момент запуска сервера и каждый запуск идёт с чистого листа
+(см. config/scenarios/demo.yaml). Секция clock в сценарии переопределяет clock из server.yaml.
 """
 import os
 from dataclasses import dataclass, field
@@ -34,6 +37,8 @@ class Scenario:
     dust_csv: str | None
     history_step_s: float
     messages: list = field(default_factory=list)
+    live_start: bool = False      # start: now — старт при запуске сервера, состояние не сохраняется между запусками
+    clock: dict = field(default_factory=dict)   # переопределение clock из server.yaml
 
 
 def load_scenario(path: str) -> Scenario:
@@ -41,10 +46,16 @@ def load_scenario(path: str) -> Scenario:
         raw = yaml.safe_load(f)
     base_dir = os.path.dirname(os.path.abspath(path))
 
-    start = datetime.fromisoformat(str(raw["start"]))
+    live_start = str(raw["start"]).strip().lower() == "now"
+    start = datetime.now().replace(microsecond=0) if live_start else datetime.fromisoformat(str(raw["start"]))
     sol_min = float(raw.get("sol_min", SOL_MIN))
     mars0 = MarsTime(start, 0, sol_min)
-    start_t = mars0.parse(raw["start_mars"]) if raw.get("start_mars") else hhmm_to_min(start.strftime("%H:%M"))
+    if raw.get("start_mars"):
+        start_t = mars0.parse(raw["start_mars"])
+    elif live_start:
+        raise ValueError("Сценарий: при start: now нужно указать start_mars")
+    else:
+        start_t = hhmm_to_min(start.strftime("%H:%M"))
     mars = MarsTime(start, start_t, sol_min)
     end_t = start_t + float(raw.get("duration_h", 50)) * 60
 
@@ -72,4 +83,6 @@ def load_scenario(path: str) -> Scenario:
         dust_csv=rel(raw.get("dust_csv")),
         history_step_s=float(raw.get("history_step_s", 30)),
         messages=messages,
+        live_start=live_start,
+        clock=dict(raw.get("clock") or {}),
     )

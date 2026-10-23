@@ -112,7 +112,7 @@ lines:
 #   - {id: 10, driver: tuya, scale: 1, tuya: {device_id: "bff42e47babbedfe78bzux", local_key: "1e(_a<SZ$c;USO+}", ip: "192.168.101.54", version: 3.5}}
 #   - {id: 11, driver: tuya, scale: 1, tuya: {device_id: "bfc4e6a8cdd9c2a6dbs8g2", local_key: "QQvccJT3o0/}&VTk", ip: "192.168.101.52", version: 3.5}}
 #   - {id: 12, driver: tuya, scale: 1, tuya: {device_id: "bf9f7a554c248407d3svoj", local_key: "oox@}Y>uq>4TZguu", ip: "192.168.101.53", version: 3.5}}
-#   - {id: 13, driver: tuya, scale: 1, tuya: {device_id: "bfa7acde5a42e297a5htnd", local_key: ">W{t7T9J;('?cbY9", ip: "192.168.101.63", version: 3.5}}
+#   - {id: 13, driver: tuya, scale: 1, tuya: {device_id: "bfa7acde5a42e297a5htnd", local_key: ">W{t7T9J;('?cbY9", ip: "192.168.101.51", version: 3.5}}
 
 # 2й щиток
 # lines:

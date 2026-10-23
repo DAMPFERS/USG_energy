@@ -100,32 +100,32 @@ lines:
 # Реальные реле (для перехода на железо — перенести нужные строки в lines и указать id 1–13)
 # 1й щиток
 # lines:
-#   - {id: 1,  driver: tuya, scale: 1, tuya: {device_id: "bf9d41e93a7fbcf8eazzxf", local_key: "28WvqvS1k6ukj7S2", ip: "192.168.101.130", version: 3.5}}
-#   - {id: 2,  driver: tuya, scale: 1, tuya: {device_id: "bf651a3c2067fa7121uxxy", local_key: "?k|gh~6PS~d&^}1e", ip: "192.168.101.114", version: 3.5}}
-#   - {id: 3,  driver: tuya, scale: 1, tuya: {device_id: "bf8b5c5adc297beb5bw8bz", local_key: "_'ZJtFb0b+ly0X<c", ip: "192.168.101.117", version: 3.5}}
-#   - {id: 4,  driver: tuya, scale: 1, tuya: {device_id: "bff09de7b4235d9b06lzzd", local_key: "qmcW6(@ilUO&0VZf", ip: "192.168.101.161", version: 3.5}}
-#   - {id: 5,  driver: tuya, scale: 1, tuya: {device_id: "bf69f018907ddd23d1pnxs", local_key: "Qi42Sv]CcdK|#1C@", ip: "192.168.101.102", version: 3.5}}
-#   - {id: 6,  driver: tuya, scale: 1, tuya: {device_id: "bf0e96bbdf3bfefc8e5ggn", local_key: "|0j0L!LEu/t(;jK3", ip: "192.168.101.129", version: 3.5}}
-#   - {id: 7,  driver: tuya, scale: 1, tuya: {device_id: "bf652ea4f5e08a641e0kwm", local_key: "S'_xd{!glrG11_Q}", ip: "192.168.101.124", version: 3.5}}
-#   - {id: 8,  driver: tuya, scale: 1, tuya: {device_id: "bff6a69a33633f860cpy5p", local_key: "XY83XJGkUkTo:.:@", ip: "192.168.101.122", version: 3.5}}
-#   - {id: 9,  driver: tuya, scale: 1, tuya: {device_id: "bf8655068eaeb8faf7qngb", local_key: "Q#I-|DRAv@7j3O(G", ip: "192.168.101.100", version: 3.5}}
-#   - {id: 10, driver: tuya, scale: 1, tuya: {device_id: "bff42e47babbedfe78bzux", local_key: "1e(_a<SZ$c;USO+}", ip: "192.168.101.169", version: 3.5}}
-#   - {id: 11, driver: tuya, scale: 1, tuya: {device_id: "bfc4e6a8cdd9c2a6dbs8g2", local_key: "QQvccJT3o0/}&VTk", ip: "192.168.101.142", version: 3.5}}
-#   - {id: 12, driver: tuya, scale: 1, tuya: {device_id: "bf9f7a554c248407d3svoj", local_key: "oox@}Y>uq>4TZguu", ip: "192.168.101.138", version: 3.5}}
-#   - {id: 13, driver: tuya, scale: 1, tuya: {device_id: "bfa7acde5a42e297a5htnd", local_key: ">W{t7T9J;('?cbY9", ip: "192.168.101.157", version: 3.5}}
+#   - {id: 1,  driver: tuya, scale: 1, tuya: {device_id: "bf9d41e93a7fbcf8eazzxf", local_key: "28WvqvS1k6ukj7S2", ip: "192.168.101.60", version: 3.5}}
+#   - {id: 2,  driver: tuya, scale: 1, tuya: {device_id: "bf651a3c2067fa7121uxxy", local_key: "?k|gh~6PS~d&^}1e", ip: "192.168.101.59", version: 3.5}}
+#   - {id: 3,  driver: tuya, scale: 1, tuya: {device_id: "bf8b5c5adc297beb5bw8bz", local_key: "_'ZJtFb0b+ly0X<c", ip: "192.168.101.63", version: 3.5}}
+#   - {id: 4,  driver: tuya, scale: 1, tuya: {device_id: "bff09de7b4235d9b06lzzd", local_key: "qmcW6(@ilUO&0VZf", ip: "192.168.101.62", version: 3.5}}
+#   - {id: 5,  driver: tuya, scale: 1, tuya: {device_id: "bf69f018907ddd23d1pnxs", local_key: "Qi42Sv]CcdK|#1C@", ip: "192.168.101.58", version: 3.5}}
+#   - {id: 6,  driver: tuya, scale: 1, tuya: {device_id: "bf0e96bbdf3bfefc8e5ggn", local_key: "|0j0L!LEu/t(;jK3", ip: "192.168.101.61", version: 3.5}}
+#   - {id: 7,  driver: tuya, scale: 1, tuya: {device_id: "bf652ea4f5e08a641e0kwm", local_key: "S'_xd{!glrG11_Q}", ip: "192.168.101.56", version: 3.5}}
+#   - {id: 8,  driver: tuya, scale: 1, tuya: {device_id: "bff6a69a33633f860cpy5p", local_key: "XY83XJGkUkTo:.:@", ip: "192.168.101.57", version: 3.5}}
+#   - {id: 9,  driver: tuya, scale: 1, tuya: {device_id: "bf8655068eaeb8faf7qngb", local_key: "Q#I-|DRAv@7j3O(G", ip: "192.168.101.55", version: 3.5}}
+#   - {id: 10, driver: tuya, scale: 1, tuya: {device_id: "bff42e47babbedfe78bzux", local_key: "1e(_a<SZ$c;USO+}", ip: "192.168.101.54", version: 3.5}}
+#   - {id: 11, driver: tuya, scale: 1, tuya: {device_id: "bfc4e6a8cdd9c2a6dbs8g2", local_key: "QQvccJT3o0/}&VTk", ip: "192.168.101.52", version: 3.5}}
+#   - {id: 12, driver: tuya, scale: 1, tuya: {device_id: "bf9f7a554c248407d3svoj", local_key: "oox@}Y>uq>4TZguu", ip: "192.168.101.53", version: 3.5}}
+#   - {id: 13, driver: tuya, scale: 1, tuya: {device_id: "bfa7acde5a42e297a5htnd", local_key: ">W{t7T9J;('?cbY9", ip: "192.168.101.63", version: 3.5}}
 
 # 2й щиток
 # lines:
-#   - {id: 1,  name: "Линия 1",  driver: tuya, scale: 1, tuya: {device_id: "bfa7acde5a42e297a5htnd", local_key: "?-:h0.CN<o|@70;^", ip: "192.168.8.89", version: 3.5}}
-#   - {id: 2,  name: "Линия 2", driver: tuya, scale: 1, tuya: {device_id: "bf9f7a554c248407d3svoj", local_key: "]@.[$Psu+KVZAsnc", ip: "192.168.8.90", version: 3.5}}
-#   - {id: 3,  name: "Линия 3", driver: tuya, scale: 1, tuya: {device_id: "bfc4e6a8cdd9c2a6dbs8g2", local_key: "n5$YGZQ~Hw*'nRTQ", ip: "192.168.8.91", version: 3.5}}
-#   - {id: 4,  name: "Линия 4",  driver: tuya, scale: 1, tuya: {device_id: "bff42e47babbedfe78bzux", local_key: "120@RyM*3uQz-@+L", ip: "192.168.8.92", version: 3.5}}
-#   - {id: 5,  name: "Линия 5",  driver: tuya, scale: 1, tuya: {device_id: "bf8655068eaeb8faf7qngb", local_key: "2k7FUMU)x&*b5pD(", ip: "192.168.8.93", version: 3.5}}
-#   - {id: 6,  name: "Линия 6",  driver: tuya, scale: 1, tuya: {device_id: "bff6a69a33633f860cpy5p", local_key: "-+Ofef.h?s;oE;yn", ip: "192.168.8.94", version: 3.5}}
-#   - {id: 7,  name: "Линия 7",  driver: tuya, scale: 1, tuya: {device_id: "bf652ea4f5e08a641e0kwm", local_key: "luIo}[^rU-qXF/ZR", ip: "192.168.8.95", version: 3.5}}
-#   - {id: 8,  name: "Линия 8",  driver: tuya, scale: 1, tuya: {device_id: "bf0e96bbdf3bfefc8e5ggn", local_key: "A=X*JbW#LdVdaTl>", ip: "192.168.8.96", version: 3.5}}
-#   - {id: 9,  name: "Линия 9",  driver: tuya, scale: 1, tuya: {device_id: "bf69f018907ddd23d1pnxs", local_key: "#IO]*c+Yfa_yb4fI", ip: "192.168.8.97", version: 3.5}}
-#   - {id: 10, name: "Линия 10",  driver: tuya, scale: 1, tuya: {device_id: "bff09de7b4235d9b06lzzd", local_key: "VAL0lcU~6*(`ut1Y", ip: "192.168.8.98", version: 3.5}}
-#   - {id: 11, name: "Линия 11",  driver: tuya, scale: 1, tuya: {device_id: "bf8b5c5adc297beb5bw8bz", local_key: "ods<vOr-G3j<9t2S", ip: "192.168.8.99", version: 3.5}}
-#   - {id: 12, name: "Линия 12", driver: tuya, scale: 1, tuya: {device_id: "bf651a3c2067fa7121uxxy", local_key: "Rzuf{ha)@DGshq6:", ip: "192.168.8.100", version: 3.5}}
-#   - {id: 13, name: "Линия 13", driver: tuya, scale: 1, tuya: {device_id: "bf300250be44f94b976767", local_key: "nCrrerr@*kJ5H?!7", ip: "192.168.8.127", version: 3.5}} 
+#   - {id: 1,  driver: tuya, scale: 1, tuya: {device_id: "bf7769b9854d5e4af71etv", local_key: "ZgS-lI$gB0p}3dK*", ip: "192.168.102.63", version: 3.5}}
+#   - {id: 2,  driver: tuya, scale: 1, tuya: {device_id: "bf300250be9bf94b97w0by", local_key: "8Uj+4T2Nyc/pF|Qw", ip: "192.168.102.62", version: 3.5}}
+#   - {id: 3,  driver: tuya, scale: 1, tuya: {device_id: "bf782d238fb2624a39ofeh", local_key: "(q!{xlAx(080=`q2", ip: "192.168.102.61", version: 3.5}}
+#   - {id: 4,  driver: tuya, scale: 1, tuya: {device_id: "bf0826a3d2a603fefex5bq", local_key: "L+z{S6^#_W$bj&Z]", ip: "192.168.102.60", version: 3.5}}
+#   - {id: 5,  driver: tuya, scale: 1, tuya: {device_id: "bf0a1968c335a2e2c6r30p", local_key: "^89I{eNi~Oh];v-K", ip: "192.168.102.59", version: 3.5}}
+#   - {id: 6,  driver: tuya, scale: 1, tuya: {device_id: "bf7e1560c925f2db088g2a", local_key: "Wp{x?Ls/)[PP2e.e", ip: "192.168.102.58", version: 3.5}}
+#   - {id: 7,  driver: tuya, scale: 1, tuya: {device_id: "bf0dd8e6cb9485b047pgvf", local_key: "!v$RC[?!>)Na43O5", ip: "192.168.102.57", version: 3.5}}
+#   - {id: 8,  driver: tuya, scale: 1, tuya: {device_id: "bfaa3385b67a0cdbe0wiwo", local_key: "i|2!nLbA='mF9gtd", ip: "192.168.102.56", version: 3.5}}
+#   - {id: 9,  driver: tuya, scale: 1, tuya: {device_id: "bfd48cd1e0ac0f0968nhxj", local_key: "?_{*`?C!k+>D1u9_", ip: "192.168.102.55", version: 3.5}}
+#   - {id: 10, driver: tuya, scale: 1, tuya: {device_id: "bfe270aa8fcdd6ad16zhqz", local_key: "m6C~y|y2GYPx8sb.", ip: "192.168.102.54", version: 3.5}}
+#   - {id: 11, driver: tuya, scale: 1, tuya: {device_id: "bf1e390576573dac1acgmn", local_key: "hZwXbXTf#]7>W.?A", ip: "192.168.102.53", version: 3.5}}
+#   - {id: 12, driver: tuya, scale: 1, tuya: {device_id: "bf3b2511937c4e33298lkd", local_key: "*j)yn&(y9^PZI]Sg", ip: "192.168.102.52", version: 3.5}}
+#   - {id: 13, driver: tuya, scale: 1, tuya: {device_id: "bfa0b22d189059bb59aymo", local_key: "uZz|VjWHaEIc/}Z4", ip: "192.168.102.51", version: 3.5}} 
